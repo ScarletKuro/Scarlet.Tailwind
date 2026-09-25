@@ -1,0 +1,74 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Version>$(TailwindVersion)</Version>
+    <PackageId>Scarlet.Tailwind.Runtime.darwin-arm64</PackageId>
+    <Description>Tailwind CSS standalone CLI for macOS ARM64 (Apple Silicon)</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <DevelopmentDependency>True</DevelopmentDependency>
+
+    <!-- Asset-only package: it ships runtimes/ and build/, never a managed assembly.
+         Without this, consumers get a compile reference to an empty Scarlet.Tailwind.Runtime.darwin-arm64.dll. -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+
+    <!-- RID-specific settings -->
+    <RuntimeRid>osx-arm64</RuntimeRid>
+    <TailwindFileName>tailwindcss</TailwindFileName>
+
+    <!-- CI -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <Authors>ScarletKuro</Authors>
+    <RepositoryUrl>https://github.com/ScarletKuro/Scarlet.Tailwind</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageIcon>icon.png</PackageIcon>
+    <PackageTags>tailwind;tailwindcss;runtime;macos;osx;arm64</PackageTags>
+  </PropertyGroup>
+
+  <!-- Pack README.md, icon and the props files into the package -->
+  <ItemGroup>
+    <None Update="README.md">
+      <Pack>true</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="..\..\icon.png">
+      <Pack>true</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+    <None Include="build\**\*">
+      <Pack>true</Pack>
+      <PackagePath>build\</PackagePath>
+    </None>
+    <None Include="buildMultiTargeting\**\*">
+      <Pack>true</Pack>
+      <PackagePath>buildMultiTargeting\</PackagePath>
+    </None>
+  </ItemGroup>
+
+  <!-- Downloads "tailwindcss" next to the .csproj if missing -->
+  <Target Name="DownloadTailwindIfMissing" BeforeTargets="Build">
+    <PropertyGroup>
+      <!-- Paths to helper scripts -->
+      <TailwindDownloadScriptPathPwsh>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\..\tools\download-tailwind.ps1'))</TailwindDownloadScriptPathPwsh>
+      <TailwindDownloadScriptPathBash>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../tools/download-tailwind.sh'))</TailwindDownloadScriptPathBash>
+      <TailwindExecutable>$(MSBuildThisFileDirectory)$(TailwindFileName)</TailwindExecutable>
+      <TailwindDownloadFilename>tailwindcss-macos-arm64</TailwindDownloadFilename>
+    </PropertyGroup>
+
+    <Message Text="DownloadFilename resolved to: $(TailwindDownloadFilename)" Importance="High" />
+
+    <Exec Condition="'$(OS)' == 'Windows_NT'"
+          Command='pwsh -NoProfile -ExecutionPolicy Bypass -File "$(TailwindDownloadScriptPathPwsh)" -ExecutablePath "$(TailwindExecutable)" -DownloadFilename "$(TailwindDownloadFilename)" -TailwindVersion "$(TailwindVersion)"'
+          ContinueOnError="true" IgnoreExitCode="true" />
+    <Exec Condition="'$(OS)' != 'Windows_NT'"
+          Command='bash "$(TailwindDownloadScriptPathBash)" "$(TailwindExecutable)" "$(TailwindDownloadFilename)" "$(TailwindVersion)"'
+          ContinueOnError="true" IgnoreExitCode="true" />
+  </Target>
+
+  <!-- Common copy/pack logic -->
+  <Import Project="$(MSBuildThisFileDirectory)..\..\build\TailwindRuntime.targets" />
+</Project>

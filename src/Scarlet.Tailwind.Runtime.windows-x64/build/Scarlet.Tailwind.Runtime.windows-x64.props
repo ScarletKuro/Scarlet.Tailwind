@@ -1,0 +1,42 @@
+<Project>
+  <!--
+    Tailwind runtime pack for Windows x64.
+
+    TailwindRuntimePack is the contract Scarlet.Tailwind.MSBuild reads. It is an item rather than one
+    property per runtime identifier so that a new identifier - a musl build, an emulated build, or a
+    locally built Tailwind - only needs a package that contributes one of these items; the task, its
+    parameters and its targets stay untouched.
+
+    Metadata:
+      Rid          - runtime identifier this pack serves. Required.
+      RuntimesPath - directory containing <rid>/native/<executable>. Required.
+      NativeRid    - subdirectory the executable is really stored under. Optional, defaults to Rid.
+      Variant      - Tailwind build variant, for diagnostics only.
+      Priority     - higher wins when several packs serve the same Rid. Defaults to 0.
+  -->
+  <ItemGroup>
+    <TailwindRuntimePack Include="Scarlet.Tailwind.Runtime.windows-x64">
+      <Rid>win-x64</Rid>
+      <RuntimesPath>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..', 'runtimes'))</RuntimesPath>
+      <Variant>default</Variant>
+      <Priority>0</Priority>
+    </TailwindRuntimePack>
+
+    <!--
+      Windows ARM64. Tailwind publishes no ARM64 build for Windows, and Windows 11 on ARM runs x64
+      executables under emulation, so this package serves win-arm64 out of the same win-x64 binary -
+      hence NativeRid. No second package and no duplicated 110 MB payload.
+
+      Priority -100 means that the day someone publishes a native Scarlet.Tailwind.Runtime.windows-arm64
+      at the default priority, it wins automatically and this item becomes dead weight: no code change,
+      no resolver change, no breaking change.
+    -->
+    <TailwindRuntimePack Include="Scarlet.Tailwind.Runtime.windows-x64 (win-arm64)">
+      <Rid>win-arm64</Rid>
+      <NativeRid>win-x64</NativeRid>
+      <RuntimesPath>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..', 'runtimes'))</RuntimesPath>
+      <Variant>x64-emulated</Variant>
+      <Priority>-100</Priority>
+    </TailwindRuntimePack>
+  </ItemGroup>
+</Project>

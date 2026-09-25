@@ -1,0 +1,68 @@
+# .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.log
+TestResults/
+junit/
+[Dd]ebug/
+[Rr]elease/
+*.nupkg
+*.snupkg
+
+# VS Code
+.vscode/
+.vs/
+
+# Rider
+.idea/
+*.sln.iml
+
+# Build results
+[Bb]uild[Ll]og.*
+*.pidb
+*.userprefs
+artifacts/
+
+# Visual Studio profiler
+*.psess
+*.vsp
+*.vspx
+
+# ReSharper
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+.env
+
+# Downloaded Tailwind runtime binaries (generated during build)
+src/**/tailwindcss
+src/**/tailwindcss.exe
+# Version marker files for downloaded runtimes
+src/**/tailwindcss.version
+src/**/tailwindcss.exe.version
+# But keep the project source files
+!src/**/*.csproj
+!src/**/*.cs
+!src/**/*.md
+!src/**/*.props
+!src/**/*.targets
+
+# Test outputs
+*.trx
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+__MACOSX/
+packages/

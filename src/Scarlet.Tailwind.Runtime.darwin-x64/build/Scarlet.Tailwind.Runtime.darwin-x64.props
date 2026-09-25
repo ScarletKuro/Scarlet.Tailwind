@@ -1,0 +1,25 @@
+<Project>
+  <!--
+    Tailwind runtime pack for macOS x64 (Intel).
+
+    TailwindRuntimePack is the contract Scarlet.Tailwind.MSBuild reads. It is an item rather than one
+    property per runtime identifier so that a new identifier - a musl build, an emulated build, or a
+    locally built Tailwind - only needs a package that contributes one of these items; the task, its
+    parameters and its targets stay untouched.
+
+    Metadata:
+      Rid          - runtime identifier this pack serves. Required.
+      RuntimesPath - directory containing <rid>/native/<executable>. Required.
+      NativeRid    - subdirectory the executable is really stored under. Optional, defaults to Rid.
+      Variant      - Tailwind build variant, for diagnostics only.
+      Priority     - higher wins when several packs serve the same Rid. Defaults to 0.
+  -->
+  <ItemGroup>
+    <TailwindRuntimePack Include="Scarlet.Tailwind.Runtime.darwin-x64">
+      <Rid>osx-x64</Rid>
+      <RuntimesPath>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..', 'runtimes'))</RuntimesPath>
+      <Variant>default</Variant>
+      <Priority>0</Priority>
+    </TailwindRuntimePack>
+  </ItemGroup>
+</Project>

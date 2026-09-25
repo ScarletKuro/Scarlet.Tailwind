@@ -1,0 +1,463 @@
+name: Deploy to NuGet
+
+on:
+  push:
+    tags:
+      # Matches SemVer 2 tags: 1.0.0, 1.0.0-preview.1, 1.0.0-rc.1, etc.
+      - '[0-9]+.[0-9]+.[0-9]+'
+      - '[0-9]+.[0-9]+.[0-9]+-*'
+  workflow_dispatch:
+    inputs:
+      release_target:
+        description: What package family should this manual run publish?
+        required: true
+        default: auto
+        type: choice
+        options:
+          # Preserve the tag-push behavior: pack and push every package, with --skip-duplicate doing the filtering.
+          - auto
+          # Publish only Scarlet.Tailwind.MSBuild. Select a tag ref when dispatching this target.
+          - msbuild
+          # Publish Tailwind runtime packages and the matching CLI package for a TailwindVersion bump.
+          - runtime-and-cli
+          # Publish only Scarlet.Tailwind.Cli for a TailwindCliRevision bump.
+          - cli
+
+jobs:
+  # Run tests before deploying
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest, windows-11-arm]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run tests with coverage
+        run: dotnet test --no-build --configuration Release --collect:"XPlat Code Coverage" --results-directory ./coverage
+
+  # No GitHub-hosted runner offers musl/Alpine natively, unlike every other platform above which runs on
+  # its own native OS. This runs inside a musl-based .NET SDK container on top of a regular Linux runner
+  # instead, so the musl runtime packages get proven against a real musl libc before a release ships.
+  test-musl:
+    name: Test on Linux musl / Alpine (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-alpine
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            os: ubuntu-latest
+          - arch: arm64
+            os: ubuntu-24.04-arm
+      fail-fast: false
+
+    steps:
+      - name: Install build prerequisites
+        run: apk add --no-cache bash curl unzip icu-libs git
+
+      # actions/checkout is a JS action, and the runner's bundled Node build for Alpine containers only
+      # covers x64 - on the arm64 leg it fails with "JavaScript Actions in Alpine containers are only
+      # supported on x64 Linux runners". git is a native binary, so it works on both legs regardless.
+      - name: Checkout code
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git init .
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git fetch --depth 1 origin "${{ github.sha }}"
+          git checkout FETCH_HEAD
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run tests
+        run: dotnet test --no-build --configuration Release
+
+      - name: Pack NuGet packages
+        shell: bash
+        run: |
+          VERSION="0.0.1-ci.${{ github.run_number }}"
+          TAILWIND_VERSION=$(sed -n 's/.*<TailwindVersion>\([^<]*\)<\/TailwindVersion>.*/\1/p' Directory.Build.props)
+
+          # Needed by the package-installation E2E test below, which references it by name/version.
+          dotnet pack src/Scarlet.Tailwind.MSBuild/Scarlet.Tailwind.MSBuild.csproj \
+            --no-build \
+            --configuration Release \
+            --output ./packages -p:Version=$VERSION
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-x64-musl/Scarlet.Tailwind.Runtime.linux-x64-musl.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-arm64-musl/Scarlet.Tailwind.Runtime.linux-arm64-musl.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Cli/Scarlet.Tailwind.Cli.csproj \
+            --configuration Release \
+            --output ./packages
+
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAILWIND_VERSION=$TAILWIND_VERSION" >> $GITHUB_ENV
+
+      # Proves Scarlet.Tailwind.MSBuild itself resolves and runs a musl Tailwind via the TailwindRuntimePack contract,
+      # not just that the CLI tool does.
+      #
+      # $GITHUB_WORKSPACE (the env var), not ${{ github.workspace }} (the expression): inside a job-level
+      # container the expression resolves to the HOST path (/home/runner/work/...), which does not exist
+      # inside the container's filesystem, while the env var correctly reports the container-side mount
+      # (/__w/...) that dotnet pack actually wrote ./packages under.
+      - name: E2E Test - Package installation
+        shell: bash
+        run: |
+          chmod +x tests/e2e/package-installation/verify.sh
+          tests/e2e/package-installation/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      # This is what actually proves the musl binaries execute on real musl libc before a release is
+      # published, not just that the zip unpacked correctly.
+      - name: E2E Test - CLI tool
+        shell: bash
+        run: |
+          chmod +x tests/e2e/cli-tool/verify.sh
+          tests/e2e/cli-tool/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+  deploy:
+    name: Build and Deploy to NuGet
+    runs-on: ubuntu-latest
+    # Only run deploy if all tests pass, including musl
+    needs: [test, test-musl]
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # Full history + tags, needed by `git describe --tags` below on a workflow_dispatch run -
+          # actions/checkout's default shallow clone carries no tags at all.
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Resolve release target
+        id: release_target
+        shell: bash
+        run: |
+          TARGET="${{ github.event.inputs.release_target }}"
+          if [ -z "$TARGET" ]; then
+            TARGET="auto"
+          fi
+
+          PUBLISH_MSBUILD=false
+          PUBLISH_RUNTIME=false
+          PUBLISH_CLI=false
+
+          case "$TARGET" in
+            auto)
+              PUBLISH_MSBUILD=true
+              PUBLISH_RUNTIME=true
+              PUBLISH_CLI=true
+              ;;
+            msbuild)
+              PUBLISH_MSBUILD=true
+              ;;
+            runtime-and-cli)
+              PUBLISH_RUNTIME=true
+              PUBLISH_CLI=true
+              ;;
+            cli)
+              PUBLISH_CLI=true
+              ;;
+            *)
+              echo "Unknown release target: $TARGET"
+              exit 1
+              ;;
+          esac
+
+          if [ "$PUBLISH_MSBUILD" = "true" ] && [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ github.ref_type }}" != "tag" ]; then
+            echo "Manual runs that publish Scarlet.Tailwind.MSBuild must be dispatched from the SemVer tag."
+            echo "For a branch-based TailwindVersion release, choose release_target=runtime-and-cli."
+            echo "For a branch-based TailwindCliRevision release, choose release_target=cli."
+            exit 1
+          fi
+
+          # Some E2E validations need local support packages even when those packages are not published.
+          # The package-installation test maps Scarlet.Tailwind.* to ./packages only, so an MSBuild or runtime
+          # release needs both the MSBuild package and runtime packages locally.
+          PACK_MSBUILD=false
+          PACK_RUNTIME=false
+          PACK_CLI=false
+
+          if [ "$PUBLISH_MSBUILD" = "true" ] || [ "$PUBLISH_RUNTIME" = "true" ]; then
+            PACK_MSBUILD=true
+            PACK_RUNTIME=true
+          fi
+
+          if [ "$PUBLISH_CLI" = "true" ]; then
+            PACK_CLI=true
+          fi
+
+          echo "target=$TARGET" >> $GITHUB_OUTPUT
+          echo "publish_msbuild=$PUBLISH_MSBUILD" >> $GITHUB_OUTPUT
+          echo "publish_runtime=$PUBLISH_RUNTIME" >> $GITHUB_OUTPUT
+          echo "publish_cli=$PUBLISH_CLI" >> $GITHUB_OUTPUT
+          echo "pack_msbuild=$PACK_MSBUILD" >> $GITHUB_OUTPUT
+          echo "pack_runtime=$PACK_RUNTIME" >> $GITHUB_OUTPUT
+          echo "pack_cli=$PACK_CLI" >> $GITHUB_OUTPUT
+
+          echo "release target: $TARGET"
+          echo "publish: msbuild=$PUBLISH_MSBUILD runtime=$PUBLISH_RUNTIME cli=$PUBLISH_CLI"
+          echo "pack: msbuild=$PACK_MSBUILD runtime=$PACK_RUNTIME cli=$PACK_CLI"
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          # Remove 'refs/tags/' prefix to get just the version number. On a manual (workflow_dispatch)
+          # run from a branch there is no tag ref, so fall back to the latest tag reachable from this
+          # commit. That version is used for local validation packages and artifact names.
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            VERSION=${GITHUB_REF#refs/tags/}
+          else
+            VERSION=$(git describe --tags --abbrev=0)
+          fi
+          echo "version=$VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release /p:Version=${{ steps.get_version.outputs.version }}
+
+      - name: Extract TailwindVersion
+        id: get_tailwind_version
+        run: |
+          TAILWIND_VERSION=$(sed -n 's/.*<TailwindVersion>\([^<]*\)<\/TailwindVersion>.*/\1/p' Directory.Build.props)
+          echo "tailwind_version=$TAILWIND_VERSION"
+          echo "tailwind_version=$TAILWIND_VERSION" >> $GITHUB_OUTPUT
+
+          # The CLI package version is $(TailwindVersion).$(TailwindCliRevision), and NuGet normalises a trailing
+          # zero away - so revision 0 produces Scarlet.Tailwind.Cli.4.3.3.nupkg, not 4.3.3.0. The push step
+          # needs the real filename to identify the pointer package, which must be published last.
+          TAILWIND_CLI_REVISION=$(sed -n 's/.*<TailwindCliRevision>\([^<]*\)<\/TailwindCliRevision>.*/\1/p' Directory.Build.props)
+          if [ "$TAILWIND_CLI_REVISION" = "0" ]; then
+            CLI_VERSION="$TAILWIND_VERSION"
+          else
+            CLI_VERSION="$TAILWIND_VERSION.$TAILWIND_CLI_REVISION"
+          fi
+          echo "cli_version=$CLI_VERSION"
+          echo "cli_version=$CLI_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Pack Scarlet.Tailwind.MSBuild
+        if: steps.release_target.outputs.pack_msbuild == 'true'
+        run: |
+          dotnet pack src/Scarlet.Tailwind.MSBuild/Scarlet.Tailwind.MSBuild.csproj \
+            --no-build \
+            --configuration Release \
+            --output ./packages \
+            /p:Version=${{ steps.get_version.outputs.version }}
+
+      - name: Pack runtime packages
+        if: steps.release_target.outputs.pack_runtime == 'true'
+        run: |
+          # Runtime packages use TailwindVersion from their .csproj, no /p:Version override.
+          dotnet pack src/Scarlet.Tailwind.Runtime.windows-x64/Scarlet.Tailwind.Runtime.windows-x64.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-x64/Scarlet.Tailwind.Runtime.linux-x64.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-arm64/Scarlet.Tailwind.Runtime.linux-arm64.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-x64-musl/Scarlet.Tailwind.Runtime.linux-x64-musl.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-arm64-musl/Scarlet.Tailwind.Runtime.linux-arm64-musl.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.darwin-x64/Scarlet.Tailwind.Runtime.darwin-x64.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.darwin-arm64/Scarlet.Tailwind.Runtime.darwin-arm64.csproj \
+            --configuration Release \
+            --output ./packages
+
+      - name: Pack Scarlet.Tailwind.Cli
+        if: steps.release_target.outputs.pack_cli == 'true'
+        run: |
+          # Like the runtime packages, the CLI versions from TailwindVersion, so no /p:Version; and no
+          # --no-build, because one pack fans out into a build per runtime identifier. This produces the
+          # eight RID packages, the portable 'any' package and the top-level pointer package.
+          dotnet pack src/Scarlet.Tailwind.Cli/Scarlet.Tailwind.Cli.csproj \
+            --configuration Release \
+            --output ./packages
+
+      - name: List generated packages
+        run: ls -lh ./packages/
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-${{ steps.get_version.outputs.version }}-${{ steps.release_target.outputs.target }}
+          path: |
+            ./packages/*.nupkg
+            ./packages/*.snupkg
+
+      # Validation runs against the local ./packages folder, BEFORE anything is published. NuGet packages
+      # are immutable and cannot be unpublished, so discovering a packaging or tool-install failure after
+      # the push would leave a broken release permanently public.
+      - name: E2E Test - Package installation and verification
+        if: steps.release_target.outputs.pack_msbuild == 'true' && steps.release_target.outputs.pack_runtime == 'true'
+        run: |
+          chmod +x tests/e2e/package-installation/verify.sh
+          tests/e2e/package-installation/verify.sh "${{ github.workspace }}" "${{ steps.get_version.outputs.version }}" "${{ steps.get_tailwind_version.outputs.tailwind_version }}"
+
+      - name: E2E Test - CLI tool
+        if: steps.release_target.outputs.pack_cli == 'true'
+        run: |
+          chmod +x tests/e2e/cli-tool/verify.sh
+          tests/e2e/cli-tool/verify.sh "${{ github.workspace }}" "${{ steps.get_version.outputs.version }}" "${{ steps.get_tailwind_version.outputs.tailwind_version }}"
+
+      - name: NuGet login
+        id: login
+        uses: NuGet/login@v1
+        with:
+          user: ${{ secrets.NUGET_USER }}
+
+      - name: Push packages to NuGet
+        shell: bash
+        run: |
+          # The .NET CLI picks a tool's RID-specific package using the version of the top-level pointer
+          # package, so the pointer has to be the LAST thing to appear on the feed. A "*.nupkg" glob pushes
+          # in lexicographic order, and '.' sorts before any letter, which puts
+          # Scarlet.Tailwind.Cli.<version>.nupkg ahead of Scarlet.Tailwind.Cli.<rid>.<version>.nupkg - exactly the
+          # wrong way round. Any install during that window fails.
+          CLI_POINTER="./packages/Scarlet.Tailwind.Cli.${{ steps.get_tailwind_version.outputs.cli_version }}.nupkg"
+
+          if [ ! -f "$CLI_POINTER" ]; then
+            if [ "${{ steps.release_target.outputs.publish_cli }}" = "true" ]; then
+              echo "Expected the Scarlet.Tailwind.Cli pointer package at $CLI_POINTER"
+              ls -1 ./packages/
+              exit 1
+            fi
+          fi
+
+          should_push_package() {
+            local package="$1"
+            local name
+            name="$(basename "$package")"
+
+            if [ "${{ steps.release_target.outputs.publish_msbuild }}" = "true" ] \
+              && [[ "$name" == Scarlet.Tailwind.MSBuild.*.nupkg ]]; then
+              return 0
+            fi
+
+            if [ "${{ steps.release_target.outputs.publish_runtime }}" = "true" ] \
+              && [[ "$name" == Scarlet.Tailwind.Runtime.*.nupkg ]]; then
+              return 0
+            fi
+
+            if [ "${{ steps.release_target.outputs.publish_cli }}" = "true" ] \
+              && [[ "$name" == Scarlet.Tailwind.Cli.*.nupkg ]]; then
+              return 0
+            fi
+
+            return 1
+          }
+
+          for package in ./packages/*.nupkg; do
+            [ "$package" = "$CLI_POINTER" ] && continue
+            should_push_package "$package" || continue
+            dotnet nuget push "$package" \
+              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+              --source "https://api.nuget.org/v3/index.json" \
+              --skip-duplicate
+          done
+
+          if [ "${{ steps.release_target.outputs.publish_cli }}" = "true" ]; then
+            dotnet nuget push "$CLI_POINTER" \
+              --api-key "${{ steps.login.outputs.NUGET_API_KEY }}" \
+              --source "https://api.nuget.org/v3/index.json" \
+              --skip-duplicate
+          fi
+
+      - name: Publish to GitHub Packages
+        shell: bash
+        run: |
+          # Same ordering rule as above: every RID package first, the pointer last.
+          CLI_POINTER="./packages/Scarlet.Tailwind.Cli.${{ steps.get_tailwind_version.outputs.cli_version }}.nupkg"
+
+          should_push_package() {
+            local package="$1"
+            local name
+            name="$(basename "$package")"
+
+            if [ "${{ steps.release_target.outputs.publish_msbuild }}" = "true" ] \
+              && [[ "$name" == Scarlet.Tailwind.MSBuild.*.nupkg ]]; then
+              return 0
+            fi
+
+            if [ "${{ steps.release_target.outputs.publish_runtime }}" = "true" ] \
+              && [[ "$name" == Scarlet.Tailwind.Runtime.*.nupkg ]]; then
+              return 0
+            fi
+
+            if [ "${{ steps.release_target.outputs.publish_cli }}" = "true" ] \
+              && [[ "$name" == Scarlet.Tailwind.Cli.*.nupkg ]]; then
+              return 0
+            fi
+
+            return 1
+          }
+
+          for package in ./packages/*.nupkg; do
+            [ "$package" = "$CLI_POINTER" ] && continue
+            should_push_package "$package" || continue
+            dotnet nuget push "$package" \
+              --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+              --api-key "${{ secrets.GITHUB_TOKEN }}" \
+              --skip-duplicate
+          done
+
+          if [ "${{ steps.release_target.outputs.publish_cli }}" = "true" ]; then
+            dotnet nuget push "$CLI_POINTER" \
+              --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json" \
+              --api-key "${{ secrets.GITHUB_TOKEN }}" \
+              --skip-duplicate
+          fi
+

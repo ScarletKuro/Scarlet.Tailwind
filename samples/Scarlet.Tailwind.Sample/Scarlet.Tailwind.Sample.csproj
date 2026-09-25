@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Re-runs Tailwind on `dotnet watch` when a source file changes. Note that this watches the files
+         Tailwind scans for class names, not just the stylesheet: adding a class to a .razor file has to
+         trigger a rebuild, or the new class never reaches the CSS. -->
+    <Watch Include="Styles\**\*.css" />
+    <Watch Include="**\*.razor" />
+  </ItemGroup>
+
+  <!-- Import the Tailwind targets from the referenced project (development scenario) -->
+  <Import Project="..\..\src\Scarlet.Tailwind.MSBuild\Scarlet.Tailwind.MSBuild.targets" />
+
+  <ItemGroup>
+    <TailwindBeforeStaticWebAssets Include="Styles\app.css">
+      <OutputPath>wwwroot\css\app.css</OutputPath>
+    </TailwindBeforeStaticWebAssets>
+  </ItemGroup>
+
+  <Target Name="VerifyTailwindOutput" AfterTargets="RunTailwindBeforeStaticWebAssets">
+    <Error Text="CSS output was not created." Condition="!Exists('$(MSBuildProjectDirectory)\wwwroot\css\app.css')" />
+    <Message Text="Tailwind build completed successfully." Importance="high" />
+  </Target>
+
+</Project>

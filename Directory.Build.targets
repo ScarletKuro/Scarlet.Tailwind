@@ -1,0 +1,8 @@
+<Project>
+  <ItemGroup Condition="'$(IsPackable)' == 'true' and Exists('$(MSBuildThisFileDirectory)LICENSE-3RD-PARTY.txt')">
+    <None Include="$(MSBuildThisFileDirectory)LICENSE-3RD-PARTY.txt"
+          Pack="true"
+          PackagePath="\"
+          Visible="false" />
+  </ItemGroup>
+</Project>

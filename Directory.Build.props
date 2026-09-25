@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <!-- Tailwind CSS version used across all runtime packages -->
+    <TailwindVersion>4.3.3</TailwindVersion>
+
+    <!-- Revision of Scarlet.Tailwind.Cli within a single TailwindVersion. The CLI package version is
+         $(TailwindVersion).$(TailwindCliRevision), and NuGet normalises a trailing zero away, so revision 0
+         publishes as plain 4.3.3.
+
+         Bump this to ship a CLI-only fix without waiting for a new Tailwind: 4.3.3 -> 4.3.3.1. Reset it to
+         0 whenever TailwindVersion changes. It lives here, next to TailwindVersion, because the alternative
+         is discovering at release time that the deploy silently dropped your fix - the push skips
+         duplicates, so a rebuilt package at an unchanged version never reaches the feed. -->
+    <TailwindCliRevision>0</TailwindCliRevision>
+  </PropertyGroup>
+</Project>

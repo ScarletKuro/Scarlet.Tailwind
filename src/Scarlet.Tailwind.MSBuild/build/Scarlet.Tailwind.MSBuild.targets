@@ -1,0 +1,77 @@
+<Project>
+  <UsingTask TaskName="Scarlet.Tailwind.MSBuild.TailwindCompileTask"
+             AssemblyFile="$(MSBuildThisFileDirectory)../tools/netstandard2.0/Scarlet.Tailwind.MSBuild.dll" />
+
+  <!-- A target, not a file-scope PropertyGroup: $(IntermediateOutputPath) is not set when this file is
+       imported, only by the time a target runs. Both entry points below depend on this one rather than
+       duplicating the logic, so they cannot answer differently about where the stamp lives. -->
+  <Target Name="_TailwindResolveStampDirectory">
+    <PropertyGroup>
+      <_TailwindStampDirectory Condition="'$(TailwindStampDirectory)' != ''">$(TailwindStampDirectory)</_TailwindStampDirectory>
+      <_TailwindStampDirectory Condition="'$(_TailwindStampDirectory)' == '' AND '$(IntermediateOutputPath)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'Scarlet.Tailwind'))))</_TailwindStampDirectory>
+    </PropertyGroup>
+  </Target>
+
+  <!-- Three parts of the condition are load-bearing:
+
+       * ResolveProjectStaticWebAssets is named explicitly because it hooks AssignTargetPaths, which can run
+         before PreBuildEvent. Generating CSS after that point means it is never discovered as an asset.
+       * The TargetFrameworks/TargetFramework clause runs this once in a multi-TFM outer build and skips the
+         inner builds. Without it, a three-TFM RCL runs Tailwind three times over the same wwwroot.
+       * The NoBuild guard matters because a BeforeTargets hook still fires when the target it hooks is
+         skipped by its own condition, and ResolveProjectStaticWebAssets carries Condition="'$(NoBuild)' !=
+         'true'". Without the guard, a `dotnet pack` with the no-build flag re-runs Tailwind and rewrites wwwroot after the
+         integrity manifest was computed, so the package ships bytes that do not match their own hashes. -->
+  <Target Name="RunTailwindBeforeStaticWebAssets"
+          BeforeTargets="DispatchToInnerBuilds;ResolveProjectStaticWebAssets;PreBuildEvent"
+          DependsOnTargets="_TailwindResolveStampDirectory"
+          Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND '$(DesignTimeBuild)' != 'true' AND '$(NoBuild)' != 'true' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
+    <TailwindCompileTask Compilations="@(TailwindBeforeStaticWebAssets)"
+                         ProjectDirectory="$(MSBuildProjectDirectory)"
+                         Configuration="$(Configuration)"
+                         Minify="$(TailwindMinify)"
+                         Optimize="$(TailwindOptimize)"
+                         Map="$(TailwindMap)"
+                         Silent="$(TailwindSilent)"
+                         Cwd="$(TailwindCwd)"
+                         AdditionalArguments="$(TailwindAdditionalArguments)"
+                         StampDirectory="$(_TailwindStampDirectory)"
+                         RuntimeDirectory="$(TailwindRuntimeDirectory)"
+                         TailwindRuntimeDownload="$(TailwindRuntimeDownload)"
+                         TailwindVersionDownload="$(TailwindVersionDownload)"
+                         DownloadMutexTimeoutSeconds="$(TailwindDownloadMutexTimeoutSeconds)"
+                         TimeoutMilliseconds="$(TailwindTimeoutMilliseconds)"
+                         RuntimePacks="@(TailwindRuntimePack)">
+      <Output TaskParameter="GeneratedFiles" ItemName="_TailwindGeneratedFiles" />
+      <Output TaskParameter="RemovedFiles" ItemName="_TailwindRemovedFiles" />
+    </TailwindCompileTask>
+
+    <ItemGroup>
+      <Content Remove="@(_TailwindRemovedFiles)" />
+      <None Remove="@(_TailwindRemovedFiles)" />
+      <_TailwindGeneratedContent Include="%(_TailwindGeneratedFiles.RelativePath)" />
+      <_TailwindNewContent Include="@(_TailwindGeneratedContent)" Exclude="@(Content)" />
+      <Content Include="@(_TailwindNewContent)" CopyToPublishDirectory="PreserveNewest" />
+      <FileWrites Include="@(_TailwindGeneratedFiles)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Hooked to both targets deliberately. In a single-target-framework project CoreClean runs with
+       $(IntermediateOutputPath) set to obj/<config>/<tfm>/, which is where the build wrote the manifest. In
+       a multi-targeted one CoreClean only runs in the inner builds, whose obj/<config>/<tfm>/ never held a
+       manifest - the build ran once in the outer build and wrote to obj/<config>/. Clean does run in the
+       outer build, so hooking it as well is what makes `dotnet clean` remove generated CSS from a
+       multi-targeted project. Whichever hook resolves the other directory finds no manifest and deletes
+       nothing, so running twice is harmless. -->
+  <Target Name="TailwindClean"
+          BeforeTargets="CoreClean;Clean"
+          DependsOnTargets="_TailwindResolveStampDirectory">
+    <ReadLinesFromFile File="$(_TailwindStampDirectory)/Tailwind.generated.txt"
+                       Condition="'$(_TailwindStampDirectory)' != '' AND Exists('$(_TailwindStampDirectory)/Tailwind.generated.txt')">
+      <Output TaskParameter="Lines" ItemName="_TailwindFilesToClean" />
+    </ReadLinesFromFile>
+    <Delete Files="@(_TailwindFilesToClean)" Condition="'@(_TailwindFilesToClean)' != ''" />
+    <Delete Files="$(_TailwindStampDirectory)/Tailwind.generated.txt;$(_TailwindStampDirectory)/Tailwind.settings.stamp"
+            Condition="'$(_TailwindStampDirectory)' != ''" />
+  </Target>
+</Project>

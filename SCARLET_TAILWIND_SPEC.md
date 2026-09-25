@@ -43,6 +43,9 @@ integration follows Sass.
 - Do not invent a `tailwind.json`, `appsettings.json`, or any Scarlet-specific configuration convention.
   Tailwind v4 configures itself from the CSS entry point; Scarlet should not add a second place to look.
 - Do not expose a `Content` or source-globbing property. See *Working Directory and Source Detection*.
+- Do not expose a `TailwindConfigFile` property, and do not inspect the project for stylesheet or
+  configuration mistakes. Tailwind owns its own configuration semantics; this package runs it. See
+  *Configuration Files*.
 - Do not support Tailwind v3 in v1. See *Upstream Facts*.
 - Do not attempt MSBuild-level incremental skipping in v1. See *Incremental Build Strategy*.
 
@@ -117,6 +120,29 @@ resolve "latest" with a dedicated non-redirecting request that reads the first `
 
 That is the entire set the task needs to render.
 
+**Unrecognised flags are silently discarded.** `packages/@tailwindcss-cli/src/utils/args.ts` iterates the
+declared options and never reads anything else, so an unknown flag produces no error, no warning and no
+effect. This matters more than it sounds; see *Configuration Files*.
+
+**Repeated flags collapse to the last one, and there is no multi-input support.** The same parser does
+`if (key !== '_' && Array.isArray(value)) value = value[value.length - 1]`, so
+`--input a.css --input b.css` compiles only `b.css` without complaint. `--input` and `--output` are
+declared `type: 'string'` and consumed as scalars throughout the build command — one `path.resolve`, one
+existence check, one `fs.readFile`. One invocation is therefore one input and one output, permanently, so
+the task's process-per-entry-point shape is forced rather than chosen, and there is no batching to be had.
+
+The silent last-wins rule makes task-owned flags unsafe in `AdditionalArguments`. Overriding `--input`,
+`--output`, `--cwd`, or `--map` would make the generated-file manifest and Clean describe different files
+from the ones Tailwind actually used. The task must reject those flags and direct the user to the item and
+its metadata instead.
+
+**`--map` has two behaviours, not one.** Bare `--map` inlines the source map into the CSS; `--map <path>`
+writes an external map file at that path, resolved against `--cwd`. The CLI even rejects `--map -`
+explicitly with "Use --map without a value to inline the source map." This changes what the task produces:
+inline means one output file, external means two, so the generated-files manifest and the static web asset
+recovery both depend on which form was used. `TailwindMap` must therefore accept a path as well as a
+boolean.
+
 **Configuration lives in the CSS, not on the command line.** Tailwind v4 has no `--content` flag and no
 `--config` flag. Source detection is automatic, narrowed by `@source` directives; theme values come from
 `@theme { … }`; and a legacy `tailwind.config.js` is **no longer auto-detected** — it must be loaded
@@ -142,6 +168,28 @@ nothing to invent.
 Seven runtime packages, not eight. Package names keep the siblings' vocabulary (`windows`, `darwin`) even
 though Tailwind's own assets say `macos`; the two vocabularies stay distinct in the platform map exactly as
 they do in `Scarlet.Bun`.
+
+### Versioning
+
+Two independent version lines, exactly as in both siblings.
+
+`Directory.Build.props` holds `$(TailwindVersion)` — the pinned Tailwind release, and the single source of
+truth for every runtime package and the CLI — alongside `$(TailwindCliRevision)`, which allows a CLI-only
+fix without moving the Tailwind version. The CLI package version is `$(TailwindVersion).$(TailwindCliRevision)`.
+
+Two mechanical details are easy to get wrong and expensive to debug. **NuGet normalises a trailing zero**,
+so revision `0` publishes as plain `4.3.3` rather than `4.3.3.0`; the deploy workflow has to recompute that
+same normalisation to locate the pointer package's filename. And **the revision resets to 0 whenever
+`$(TailwindVersion)` moves**, because a re-release at an unchanged version is silently dropped by a push
+that skips duplicates.
+
+The MSBuild package is versioned independently, from the git tag, because its release cadence has nothing
+to do with Tailwind's — a targets fix should not require a Tailwind bump, and a Tailwind bump should not
+force a task release.
+
+This also answers a question that looks open but is not: there is no "version range" to decide. A runtime
+package's version *is* the Tailwind version it carries, so a consumer who wants floating behaviour writes
+it in their own `PackageReference` — `Version="4.*"` — which is their call, not this package's.
 
 `Scarlet.Tailwind.Core` should be `netstandard2.0` with `IsPackable=false`, holding platform detection,
 runtime resolution, the downloader, chmod, and process-start retry. Both shipping packages should carry the
@@ -183,9 +231,10 @@ resolution is the wrong mechanism — it resolves against `$(RuntimeIdentifier)`
 
 `Rid` and `RuntimesPath` are required; an item missing either should be skipped with a warning naming the
 pack. `Variant` is diagnostic only. `Priority` defaults to `0`, higher wins, and ties break by pack id then
-path so the outcome never depends on the order NuGet happened to import packages in. Items should be
-de-duplicated on `Rid` plus normalised `RuntimesPath`, because a package's props can be imported from more
-than one build folder.
+path so the outcome never depends on the order NuGet happened to import packages in. `NativeRid` is
+optional and defaults to `Rid`; only the emulated `win-arm64` item sets it (see *Windows ARM64*). Items
+should be de-duplicated on `Rid` plus `NativeRid` plus normalised `RuntimesPath`, because a package's props
+can be imported from more than one build folder.
 
 Precedence: an explicit `TailwindRuntimeDirectory` wins over every pack and is never second-guessed;
 `TailwindRuntimeDownload=true` bypasses pack resolution entirely; otherwise the first candidate pack whose
@@ -195,17 +244,105 @@ executable exists on disk is selected.
 stays with the item. New runtime identifiers need a package that emits the item and no change to
 `Scarlet.Tailwind.MSBuild` at all.
 
-**Windows ARM64 resolves to the Windows x64 pack.** Tailwind publishes no ARM64 binary for Windows, and
-Windows 11 on ARM runs x64 executables under emulation. A win-arm64 host should therefore select the
-`windows-x64` pack and log, at normal importance, that it did so and why. Two consequences to document: the
-emulated binary is slower than a native one would be, and if Tailwind later ships `windows-arm64`, adding
-the package is enough — the fallback becomes dead weight rather than a breaking change. Teams that prefer
-strictness can point `TailwindRuntimeDirectory` at their own binary.
+### Windows ARM64
+
+Tailwind publishes no ARM64 binary for Windows, and Windows 11 on ARM runs x64 executables under
+emulation. The mechanism for covering that gap is the pack contract itself: the `windows-x64` package
+emits **two** items.
+
+```xml
+<TailwindRuntimePack Include="Scarlet.Tailwind.Runtime.windows-x64">
+  <Rid>win-x64</Rid>
+  <RuntimesPath>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..', 'runtimes'))</RuntimesPath>
+  <Variant>default</Variant>
+  <Priority>0</Priority>
+</TailwindRuntimePack>
+
+<TailwindRuntimePack Include="Scarlet.Tailwind.Runtime.windows-x64 (win-arm64)">
+  <Rid>win-arm64</Rid>
+  <NativeRid>win-x64</NativeRid>
+  <RuntimesPath>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..', 'runtimes'))</RuntimesPath>
+  <Variant>x64-emulated</Variant>
+  <Priority>-100</Priority>
+</TailwindRuntimePack>
+```
+
+Both point at the same `win-x64/native/tailwindcss.exe`. No second package and no duplicated binary.
+
+`NativeRid` is what makes that possible, and it is the one piece of the contract this platform adds.
+`RuntimesPath` names a directory laid out as `<rid>/native/<executable>`, so a pack serving `win-arm64`
+would otherwise be looked for under `win-arm64/native/` — a directory the `windows-x64` package does not
+ship and should not have to, since shipping it would mean the same 110 MB binary twice in one nupkg.
+`NativeRid` separates the RID a pack **serves** from the one it **stores under**; it is optional, defaults
+to `Rid`, and every other package omits it. It is also the honest shape of the thing: the emulated pack
+really does serve one RID out of another's directory.
+
+**`win-arm64` is then an ordinary RID and gets no special treatment anywhere else.** It resolves through
+the same `SelectPacks` path as every other host, and the resolver's ordinary pack-selection line reports
+the `x64-emulated` variant because `Variant` is part of a pack's description — not because emulation is
+being singled out. There is no dedicated message, no extra log line, no property to refuse emulation, and
+no branch in the resolver that names this platform.
+
+That is a decision, not an omission. The alternative — a message on every build, or a
+`TailwindAllowEmulatedRuntime` switch — would treat a working configuration as a problem to be announced,
+and would mean maintaining a special case for a gap that is Tailwind's to close. Anyone who genuinely
+objects to emulation already has two answers that cost this package nothing: point
+`TailwindRuntimeDirectory` at their own binary, or do not reference the `windows-x64` package at all, which
+produces the normal "no pack matches this host" error.
+
+The decisive property is what happens when Tailwind ships a native build. Someone publishes
+`Scarlet.Tailwind.Runtime.windows-arm64` at `Priority 0`; both items now serve `win-arm64`; priority
+selects the native one; the emulated item becomes dead weight. **No code change, no resolver change, no
+breaking change** — which is the property the contract exists to provide.
+
+Two alternatives were considered and rejected.
+
+**A delimited `<Rid>win-x64;win-arm64</Rid>`** would turn `Rid` from a scalar into a list, changing
+parsing, the `Rid|RuntimesPath` de-duplication key, selection, and every error message. That is a permanent
+complication to the core contract in exchange for one platform's temporary quirk, and `Priority` already
+expresses the same thing.
+
+**Folding win-arm64 into win-x64 inside `GetPlatform()`** is simpler and has apparent sibling precedent —
+`Scarlet.Bun` folds x86 into x64. The precedent does not transfer. x86 there is a *process* architecture
+quirk, a 32-bit MSBuild on a 64-bit OS, where the host really is x64. Here the host really is ARM64, so the
+enum would be reporting something false, and that falsehood escapes into `--scarlet-info`, which exists to
+be trusted. Un-folding later would also be a code change rather than a packaging one.
+
+Teams that prefer strictness over emulation can point `TailwindRuntimeDirectory` at their own binary.
+
+**The CLI answers this differently, deliberately.** `dotnet tool` RID selection uses NuGet's RID graph,
+which we do not control, and `win-arm64` falls back to `win` and then `any` — never to `win-x64`, because
+the architecture differs. Without a RID package an ARM64 developer would therefore install the portable
+`any` package and download ~112 MB on first use, contradicting the embedded packages' promise of needing no
+network. `Scarlet.Tailwind.Cli` should therefore ship an eighth RID package, `win-arm64`, carrying the x64
+binary, with a package description saying so in as many words. The asymmetry with the runtime packages is
+principled: we own MSBuild resolution and can express the fallback declaratively, we do not own tool
+resolution and have to satisfy it with a package. It is also the safer direction, since adding a RID package
+later is additive while removing one is breaking.
 
 When no pack matches the host, the error should include a copy-pasteable `<PackageReference>` for the right
 package, mention `TailwindRuntimeDownload` and `TailwindRuntimeDirectory` as alternatives, and list the
 packs that were visible. When packs matched but no executable was found, the error should list every path
 searched. These are two genuinely different failures and should not share a message.
+
+### Host detection
+
+Detecting the host platform should be split out from reading it, as in both siblings, so unsupported
+combinations are testable without running on them.
+
+`RuntimeInformation.RuntimeIdentifier` is unavailable on `netstandard2.0`, so **musl is detected by probing
+`/lib`, `/lib64` and `/usr/lib` for `ld-musl-*.so.1`**. Only Alpine is realistically verified in CI; the
+other directories are best-effort widening. The probe is a filesystem walk, so the result should be
+computed once per task invocation and reused rather than recomputed per entry point.
+
+**x86 folds into x64.** Tailwind ships no 32-bit build, but a 32-bit *host process* on a 64-bit OS — an
+older MSBuild, for instance — can start the x64 binary perfectly well. This is the fold that is truthful,
+and the contrast with *Windows ARM64* is the point: there the host really is a different architecture, here
+only the process is.
+
+**Anything else throws `PlatformNotSupportedException` naming the architecture**, rather than resolving a
+mismatched binary. This is the error the CLI's `any` package exists to deliver — see *CLI API* — and on the
+MSBuild side it should arrive as a task error, never as a stack trace.
 
 ## MSBuild API
 
@@ -262,12 +399,13 @@ question when both are set, and would diverge from the item contract both siblin
 | `TailwindEnabled` | `true` | Enables `RunTailwindBeforeStaticWebAssets` |
 | `TailwindMinify` | `Auto` | `Auto`, `true`, or `false`. Renders `--minify` |
 | `TailwindOptimize` | `false` | Renders `--optimize`. Ignored when minifying |
-| `TailwindMap` | `Auto` | `Auto`, `true`, or `false`. Renders `--map` |
+| `TailwindMap` | `Auto` | `Auto`, `true`, `false`, or a path. `true` inlines the map, a path writes it there |
+| `TailwindSilent` | `false` | Renders `--silent`, suppressing Tailwind's non-error output |
 | `TailwindCwd` | empty | Working directory for source detection. Empty means `$(MSBuildProjectDirectory)` |
-| `TailwindAdditionalArguments` | empty | Raw arguments appended verbatim |
+| `TailwindAdditionalArguments` | empty | Extra arguments for future Tailwind options; task-owned paths, maps and watch flags are rejected |
 | `TailwindRuntimeDirectory` | empty | Explicit runtime directory containing `<rid>/native/<executable>` |
 | `TailwindRuntimeDownload` | `false` | Download the runtime instead of using runtime packs |
-| `TailwindVersionDownload` | empty | Version to download. Empty means the pinned version |
+| `TailwindVersionDownload` | empty | Version to download. Empty resolves the latest GitHub release |
 | `TailwindDownloadMutexTimeoutSeconds` | `300` | Timeout for cross-process download coordination |
 | `TailwindStampDirectory` | empty | Settings stamp and manifest directory. Empty means `$(IntermediateOutputPath)\Scarlet.Tailwind` |
 | `TailwindTimeoutMilliseconds` | `0` | Maximum time per invocation. `0` waits indefinitely |
@@ -277,11 +415,47 @@ question when both are set, and would diverge from the item contract both siblin
 | Property | Debug default | Release default |
 | --- | --- | --- |
 | `TailwindMinify` | `false` | `true` |
-| `TailwindMap` | `true` | `false` |
+| `TailwindMap` | `true`, meaning inline | `false` |
 
-`--minify` already implies optimisation, so `TailwindOptimize` exists for the narrower case of wanting
-optimised but readable output. When both are true the task should render `--minify` only, and should say so
-in the property documentation rather than passing both and relying on Tailwind's precedence.
+`Auto` resolving to `true` rather than to a path is deliberate: an inline map keeps the output to a single
+file, so the generated-files manifest has one entry, the static web asset pipeline has one asset to
+fingerprint, and `Clean` has one file to remove. The cost is a larger dev-time stylesheet, which does not
+ship because Release defaults to no map at all. A project that wants an external `.css.map` — to keep the
+served CSS small, or to match what `Scarlet.Sass` produces — sets the path form explicitly, and the task
+must then record **both** files in `GeneratedFiles` and the manifest.
+
+`--minify` already implies optimisation — the CLI describes it as "Optimize and minify the output", and
+both flags enter the same branch, with `--minify` additionally setting `minify: true` inside the optimiser.
+`TailwindOptimize` therefore covers the narrower case of wanting the optimiser's transforms (vendor
+prefixing, syntax lowering, dead-rule removal) with readable output, which is useful when debugging a
+production-shaped stylesheet or when a downstream bundler will do the minifying. When both are true the
+task should render `--minify` only, since it is a superset, and should say so in the property documentation
+rather than passing both and relying on Tailwind's precedence.
+
+**The rule for what gets a property: if Tailwind's CLI has the flag, this package exposes it.** The
+alternative — guessing which flags users will want — is how a wrapper ends up with an arbitrary subset and
+a stream of "why can't I set X" issues, and `TailwindAdditionalArguments` is a worse answer for anything
+Tailwind supports first-class. Every flag in *Upstream Facts* therefore has a home:
+
+| Flag | How it is exposed |
+| --- | --- |
+| `--input` | the item's `Include` |
+| `--output` | `OutputPath` metadata |
+| `--minify` | `TailwindMinify` / `Minify` |
+| `--optimize` | `TailwindOptimize` / `Optimize` |
+| `--map` | `TailwindMap` / `Map` |
+| `--silent` | `TailwindSilent` / `Silent` |
+| `--cwd` | `TailwindCwd` / `Cwd` |
+| `--watch` | **rejected by the MSBuild task** |
+| `--poll` | **rejected by the MSBuild task** |
+
+The two exclusions are the only ones, and they share a reason rather than being a judgement call:
+Tailwind's watch mode never exits, so a build that invoked it would hang instead of completing, and
+`--poll` is valid only alongside `--watch`. Neither may reach Tailwind through `AdditionalArguments`.
+Watching is `dotnet watch`'s job — see *Competitor Analysis*.
+
+If Tailwind adds a flag, the corresponding property is a one-line addition plus its wiring test, and the
+table above is the checklist that makes the omission obvious.
 
 ## Item Metadata
 
@@ -294,8 +468,9 @@ entry point:
   <Minify>true</Minify>
   <Optimize>false</Optimize>
   <Map>false</Map>
+  <Silent>true</Silent>
   <Cwd>..</Cwd>
-  <AdditionalArguments>--silent</AdditionalArguments>
+  <AdditionalArguments></AdditionalArguments>
 </TailwindBeforeStaticWebAssets>
 ```
 
@@ -316,6 +491,13 @@ scanned depends on where the build was invoked from — `dotnet build` in the pr
 The task should therefore always pass `--cwd`, defaulting to `$(MSBuildProjectDirectory)`. That makes
 scanning depend on the project, which is the only stable answer, and it matches what a developer running
 `npx @tailwindcss/cli` inside their project would get.
+
+**`--cwd` also resolves `--input`, `--output` and `--map`, so the task must pass all three as absolute
+paths.** Verified against 4.3.3: `--cwd=sub --input=sub/app.css` fails with
+``Specified input file `.\sub\sub\app.css` does not exist`` — the relative input is resolved a second time
+against the new working directory. Passing absolute paths removes the interaction entirely, leaves `--cwd`
+doing only the one job it is there for, and means the paths the task records in `GeneratedFiles` and the
+manifest are by construction the paths Tailwind wrote.
 
 Projects that need to scan outside the project directory should use Tailwind's own mechanisms rather than
 an MSBuild property:
@@ -338,8 +520,111 @@ Legacy JavaScript configuration is loaded the same way, from the CSS:
 @config "../../tailwind.config.js";
 ```
 
+### How v4 decides what to scan, and why `bin`/`obj` matter
+
+There is no file-type filter in v4. The v3 `content: ["./**/*.{cshtml,razor}"]` array is gone, and the
+scanner does not look for Razor or cshtml specifically — it walks the tree from the working directory and
+treats **every** surviving file as plain text, extracting anything that looks like a class name. What
+narrows it is exclusion, not inclusion.
+
+The exclusions come from three places. The `.gitignore` files that apply to the tree; the documented
+categories (CSS files, lock files, binary extensions); and a hardcoded directory list in
+`crates/oxide/src/scanner/fixtures/ignored-content-dirs.txt`, which at the time of writing is exactly:
+
+```text
+.git  .hg  .jj  .next  .parcel-cache  .pnpm-store  .svelte-kit  .svn
+.turbo  .venv  .vercel  .yarn  __pycache__  node_modules  venv
+```
+
+**Every entry is from the JavaScript or Python ecosystem. `bin` and `obj` are not there.** In a .NET
+project they are excluded by `.gitignore` alone. The scanner sets `require_git(false)`, so a `.gitignore`
+is honoured even with no `.git` directory present — which means the standard dotnet `.gitignore` does the
+job for most projects, and a project without one, or with one that does not cover `bin`/`obj`, gets both
+directories scanned.
+
+That is not merely slow, it is wrong in a specific and hard-to-debug way. `obj` holds the Razor compiler's
+generated `*.g.cs` files, which contain the class names from **previous** builds. A class deleted from a
+`.razor` file this morning is still present in yesterday's generated source, so Tailwind keeps emitting CSS
+for it, and the only symptom is a stylesheet that will not shrink. `bin` compounds it by holding copies of
+content files, so the same markup is scanned twice.
+
+The spec's position: `Scarlet.Tailwind` must not paper over this by rewriting the user's stylesheet, but it
+must not leave users to discover it either. Both samples and the README should show the exclusion
+explicitly, as the recommended starting point for a .NET project:
+
+```css
+@import "tailwindcss";
+
+@source not "./bin";
+@source not "./obj";
+```
+
+For projects that would rather enumerate sources than exclude them, `source(none)` turns off detection
+entirely and the v3 `content` array translates directly. Brace expansion is supported in source patterns —
+Tailwind's own glob tests cover `a-{b,c}-d-{e,f}-g/*.html` — so the v3 example maps one-to-one:
+
+```css
+@import "tailwindcss" source(none);
+@source "./**/*.{cshtml,razor}";
+```
+
+This is stricter and faster, at the cost of silently missing classes that appear in a file type nobody
+remembered to list — a `.cs` file building a class string, say. The README should present exclusion as the
+default and `source(none)` as the deliberate opt-in.
+
 Keeping all three in the stylesheet means one place to look, and it means a `dotnet build` and a bare
 `npx @tailwindcss/cli -i Styles/app.css -o out.css` produce the same result.
+
+## Configuration Files
+
+**There should be no `TailwindConfigFile` property.** This is worth stating as a decision rather than an
+omission, because the most widely used competitor has one and it is the single most instructive mistake in
+the field.
+
+Tailwind v4's CLI accepts no `--config` or `-c` flag — the full option set is the nine flags listed in
+*Upstream Facts*. Worse, its argument parser **silently discards unrecognised flags** rather than
+rejecting them: `packages/@tailwindcss-cli/src/utils/args.ts` iterates the declared options and simply
+never reads anything else. So passing `-c tailwind.config.js` to a v4 binary does not fail. It does
+nothing, and the build produces CSS as though no configuration existed.
+
+`tailwind-dotnet` emits `-c "$(_TailwindTailwindConfigFile)"` unconditionally, defaulting to
+`tailwind.config.js`, with no guard on the Tailwind major version, while advertising support for both v3
+and v4. On v3 that works. On v4 the user has a property that appears to be respected, a config file that
+appears to be wired up, and a silently ignored flag in between. Adding the same property to
+`Scarlet.Tailwind` would reproduce that failure exactly, because there is no correct value to pass it to.
+
+The supported path is Tailwind's own, from inside the entry stylesheet:
+
+```css
+@import "tailwindcss";
+@config "../../tailwind.config.js";
+```
+
+**The task should not inspect the project for orphaned config files either.** An earlier draft proposed
+detecting a `tailwind.config.js` that no `@config` directive references and reporting it, on the grounds
+that v4 silently ignores such a file. That was scope creep, and the reasoning behind it was a false
+analogy.
+
+The `bin`/`obj` problem in *Working Directory and Source Detection* is .NET-specific: Tailwind's ignore
+list is drawn from the JavaScript and Python ecosystems, it cannot reasonably be expected to know about the
+.NET toolchain, and this package is the only thing positioned to warn. An orphaned `tailwind.config.js` is
+not .NET-specific in any way — a React project hits exactly the same silence — so it belongs to Tailwind,
+not to a build integration. Note also that the answer for `bin`/`obj` is documentation, not a code
+diagnostic; the consistent answer here is the same.
+
+Three further reasons hold independently. A file existing is not evidence of intent: it may serve an editor
+plugin, a linter, or a neighbouring project. A broken migration and a finished one are externally
+identical, so any detection is guessing at intent from file contents — the kind of cleverness that
+generates its own bug reports. And the concern expires when v3 migrations do, whereas a per-build probe
+would not.
+
+The siblings are thin in exactly this way and should stay that way: `Scarlet.Sass` does not lint stylesheets
+or comment on unreferenced partials, and `Scarlet.Bun` does not inspect `package.json`.
+
+The lever that does belong to this package is the README. *Writing Your Entry Stylesheet* must explain
+`@config`, mark it legacy, and carry the caveat that `corePlugins`, `safelist` and `separator` are
+unsupported under v4 even through `@config`. That reaches the reader before they hit the problem, costs
+nothing at build time, and produces no false positives.
 
 ## Static Web Assets
 
@@ -404,7 +689,7 @@ v1 omission.
 ## Cleaning
 
 ```xml
-<Target Name="TailwindClean" BeforeTargets="CoreClean" DependsOnTargets="_TailwindResolveStampDirectory">
+<Target Name="TailwindClean" BeforeTargets="CoreClean;Clean" DependsOnTargets="_TailwindResolveStampDirectory">
   <ReadLinesFromFile File="$(_TailwindStampDirectory)/Tailwind.generated.txt"
                      Condition="Exists('$(_TailwindStampDirectory)/Tailwind.generated.txt')">
     <Output TaskParameter="Lines" ItemName="_TailwindFilesToClean" />
@@ -415,7 +700,9 @@ v1 omission.
 ```
 
 Manifest-driven, never a blanket `wwwroot` delete — the output directory usually contains hand-authored
-files too.
+files too. Both hooks are required: `CoreClean` finds the manifest written by a single-target build, while
+the outer `Clean` target finds the manifest written by a multi-target build. The other hook sees no manifest
+and is harmless.
 
 ## Download and Verification
 
@@ -463,9 +750,30 @@ take the mutex — a binary with no marker beside it is an interrupted download,
 ## CLI API
 
 `Scarlet.Tailwind.Cli` should pack as a .NET tool with `ToolCommandName=dotnet-tailwind`, invoked as
-`dotnet tailwind`. With `RuntimeIdentifiers` covering the seven supported RIDs plus `any`, one `dotnet pack`
-produces nine packages: seven RID-specific ones with the binary embedded, a portable `any` package that
-downloads on first use, and the top-level pointer package.
+`dotnet tailwind`. With `RuntimeIdentifiers` covering eight RIDs plus `any`, one `dotnet pack` produces ten
+packages: eight RID-specific ones with the binary embedded, a portable `any` package that downloads on
+first use, and the top-level pointer package.
+
+The eight RIDs are the seven Tailwind publishes for, plus `win-arm64` carrying the x64 binary — see
+*Windows ARM64* for why the CLI needs a package where the runtime side needs only an item. The RID-to-asset
+map therefore has one entry that is not one-to-one, and `TailwindRidMapTests` should assert that
+deliberately rather than treating it as a discrepancy to fix.
+
+**The `any` package is not optional, and its job is diagnostics as much as portability.** It embeds
+nothing, so it costs nothing to ship, and NuGet's RID graph terminates at `any` — which means it is what
+every RID we did not enumerate resolves to. Two things follow.
+
+An architecture Tailwind genuinely does not support, such as 32-bit ARM, installs successfully and then
+fails at run time with **our** message: `GetPlatform` throws naming the architecture and pointing at
+`SCARLET_TAILWIND_PATH`. Without `any`, the same user gets a NuGet install failure saying the package does
+not support their RID — technically accurate, but it blames packaging for what is really an upstream
+platform gap, and it gives them nothing to do about it.
+
+A RID that is merely unusual, rather than unsupported, works: `any` resolves the platform, downloads the
+right asset, and caches it. That is the portability half.
+
+The first-use download is real and should be documented, but it is the cost of the fallback path, not a
+reason to remove the fallback — the package itself adds no bytes to anyone's restore.
 
 Arguments are forwarded verbatim using `ArgumentList`, never a concatenated string. Standard streams are
 inherited rather than redirected, so `isatty` holds and colours and piping behave exactly as a direct
@@ -480,7 +788,7 @@ itself fetch 110 MB.
 | --- | --- |
 | `SCARLET_TAILWIND_PATH` | Explicit executable path; honoured or fails, never silently falls back |
 | `SCARLET_TAILWIND_VERSION` | Version to resolve; `latest` is a recognised token |
-| `SCARLET_TAILWIND_CACHE_DIR` | Cache root override |
+| `SCARLET_TAILWIND_CACHE` | Cache root override |
 | `SCARLET_TAILWIND_NO_EMBEDDED` | Ignore the embedded runtime |
 | `SCARLET_TAILWIND_PASSTHROUGH` | Permanently disables `--scarlet-info` |
 | `SCARLET_TAILWIND_DIAGNOSTICS` | Report the resolved binary on stderr before running |
@@ -505,6 +813,7 @@ public sealed class TailwindCompileTask : Microsoft.Build.Utilities.Task
     public string Minify { get; set; } = "Auto";
     public string Optimize { get; set; } = "false";
     public string Map { get; set; } = "Auto";
+    public string Silent { get; set; } = "false";
     public string Cwd { get; set; } = string.Empty;
     public string AdditionalArguments { get; set; } = string.Empty;
     public string StampDirectory { get; set; } = string.Empty;
@@ -585,16 +894,19 @@ single test deriving the expected attribute set by reflection over the task's pu
 and comparing it against each targets copy, so a new parameter cannot be added without being wired.
 
 Name every one: `Compilations`, `ProjectDirectory`, `Configuration`, `Minify`, `Optimize`, `Map`, `Cwd`,
-`AdditionalArguments`, `StampDirectory`, `RuntimeDirectory`, `TailwindRuntimeDownload`,
+`Silent`, `AdditionalArguments`, `StampDirectory`, `RuntimeDirectory`, `TailwindRuntimeDownload`,
 `TailwindVersionDownload`, `DownloadMutexTimeoutSeconds`, `TimeoutMilliseconds`, `RuntimePacks`.
 
-And every item metadata value: `OutputPath`, `Minify`, `Optimize`, `Map`, `Cwd`, `AdditionalArguments`.
+And every item metadata value: `OutputPath`, `Minify`, `Optimize`, `Map`, `Silent`, `Cwd`,
+`AdditionalArguments`.
 
 **Behavioural tests that must exist:**
 
 - Every setting translates into the expected command-line flag, asserted against the logged command.
 - `--cwd` defaults to the project directory, and an item's `Cwd` overrides it.
 - `--minify` and `--optimize` together render `--minify` only.
+- `TailwindMap=true` renders bare `--map` and yields one entry in `GeneratedFiles`; a path value renders
+  `--map <path>` and yields two, with the map file present on disk and removed by `Clean`.
 - Debug and Release produce different defaults, asserted through a real `dotnet build` in both — noting
   that a Configuration-driven assertion only bites in the configuration the suite does not default to.
 - A missing `OutputPath` fails with a message naming the item.
@@ -602,7 +914,9 @@ And every item metadata value: `OutputPath`, `Minify`, `Optimize`, `Map`, `Cwd`,
 - An interrupted download (marker absent, binary present) is not treated as a usable cache entry.
 - The download mutex: held past the timeout throws; abandoned by a terminated thread is treated as
   acquisition; a runtime published by another process while waiting is used rather than re-downloaded.
-- A win-arm64 host selects the windows-x64 pack and logs the fallback.
+- An unsupported architecture throws `PlatformNotSupportedException` naming it, and x86 folds into x64
+  rather than throwing.
+- A win-arm64 host selects the emulated pack, and a pack for the same RID at a higher priority beats it.
 - Pinning a v3 version fails with a message naming the version and asset.
 
 **e2e scenarios**, mirroring the siblings' five, each consuming packed nupkgs from a local feed rather than
@@ -637,36 +951,161 @@ Bun's `Inputs`/`Outputs`/`StampFile` incrementality — it solves a problem Tail
 half-applying it would invite exactly the stale-CSS failure this design avoids. Sass's
 directory-to-directory mode. Any legacy `*Runtime_<rid>` property contract.
 
+## Competitor Analysis
+
+The .NET Tailwind ecosystem is crowded but thin: most packages on nuget.org matching `tailwindcss` are
+either abandoned, tool-only, or wrappers that assume Node.js. The four below are the ones worth reasoning
+about. None of them ships unit, integration and e2e tests, which is the gap `Scarlet.Tailwind` exists to
+close.
+
+### `kallebysantos/tailwind-dotnet`
+
+The most complete competitor and the current incumbent. Packages: `Tailwind.Hosting.Build` (MSBuild),
+`Tailwind.Hosting` (an `IHostingStartup` for hot reload), `Tailwind.Hosting.Cli`. Downloads the standalone
+binary, no Node.js, claims v3 and v4 support. Properties: `TailwindVersion`, `TailwindInputCssFile`,
+`TailwindOutputCssFile`, `TailwindConfigFile`, `TailwindWatch`, `TailwindMinifyOnPublish`,
+`TailwindExcludeInputFileOnPublish`.
+
+**Strong points.** No Node.js. Sensible default paths. A genuine attempt at a dev-time watch story.
+Supports WebForms and Blazor Hybrid examples, which is broader than most.
+
+**Weak points.** No test project of any kind. `-c` is passed unconditionally and is a silent no-op on v4
+(see *Configuration Files*). The download has no cross-process coordination, so a monorepo building several
+projects in parallel has them fight over one download — the problem PR #26 was opened to fix in April 2026
+with a mutex and a configurable download location, still unmerged and unreviewed at the time of writing.
+That PR's non-acceptance is the proximate reason for building this package. The `IHostingStartup` watch
+mechanism spawns a `tailwind --watch` child from inside the running application, which on Windows leaves
+zombie processes: the watcher's lifetime is tied to a host that `dotnet watch` kills and restarts on every
+rebuild, and Windows has no process-group teardown by default, so each cycle can leak another watcher.
+
+**Borrow.** The property naming instinct is good — `TailwindInputCssFile`/`TailwindOutputCssFile` read
+well, even though this spec chooses items over properties. The decision to bundle no Node.js is correct
+and non-negotiable.
+
+**Do not borrow.** `TailwindConfigFile`. The `IHostingStartup` watcher. Downloading without a mutex.
+
+### `tailwindcss.msbuild` and `tailwindcss.cli` (duaneedwards)
+
+Version 0.0.3, published March 2022, ~4.3K downloads. Requires the Tailwind CLI to already be installed
+locally — it integrates rather than acquires. Predates Tailwind v4 by two major versions and has had no
+update since.
+
+**Borrow.** Nothing. Listed here only so the spec records that the obvious package name is taken by
+something abandoned, which matters for discoverability and naming.
+
+### `rozumak/tailwindcss-dotnet`
+
+A `dotnet tool` only, no MSBuild integration. Downloads platform-specific executables on first use and
+exposes `install`, `build`, `watch` and `exec`. Documents v3 throughout, with a `--tailwindcss` flag to
+override the CLI version; v4 support is not claimed. Last meaningful activity roughly a year ago.
+
+**Borrow.** The `exec` escape hatch is a good idea and close to what `Scarlet.Tailwind.Cli` does by
+default — forward everything verbatim rather than modelling subcommands. Their `install` scaffolding
+command is the opposite approach to this spec's, which deliberately generates nothing.
+
+### `dotnetdev-kr/DotnetDevKR.TailwindCSS`
+
+MSBuild integration for v4+. Bundles the standalone executables **inside the NuGet package itself** and
+picks one at build time by detecting OS and architecture. Properties: `InputFilename`, `OutputFilename`,
+`IsMinify`, `DebugMode`, `ProjectDir`. Its `DotnetDevKR.TailwindCSS.WebTest` is a Blazor WebAssembly
+sample, not a test suite.
+
+**Strong point.** Explicit v4 targeting, which most of the field lacks.
+
+**Weak point.** Shipping every platform's binary in one package means every consumer downloads roughly
+700 MB of binaries to use one of them. This is precisely the problem the per-RID runtime package split
+solves, and it is the clearest vindication of the sibling architecture: `Scarlet.Tailwind` ships seven
+small packages plus a discovery contract, so a consumer restores one ~110 MB binary, or none at all if they
+use download mode.
+
+**Borrow.** `DebugMode` driving source maps is the same instinct as this spec's `Configuration`-driven
+`Auto` defaults, though tying it to the SDK's own `$(Configuration)` is better than a bespoke flag.
+
+### Why Scarlet.Tailwind makes sense
+
+Three gaps are common to all of them, and each is something the sibling platform already solves:
+
+1. **No cross-process download coordination.** Every competitor that downloads does so without a mutex, so
+   parallel or monorepo builds race. `Scarlet.Bun` and `Scarlet.Sass` both solve this with a named global
+   mutex plus atomic publication, and the design carries over unchanged.
+2. **No test coverage worth the name.** None of the four ships unit, integration or e2e tests. The siblings'
+   experience is that the failures that matter — an unwired MSBuild attribute, a stale cache entry, a
+   half-written binary, output lost on timeout — are invisible without them.
+3. **No static web assets integration.** None of them runs before `ResolveProjectStaticWebAssets`, so
+   generated CSS does not get fingerprinted, does not reach `staticwebassets/` when an RCL is packed, and
+   is not removed by `dotnet clean`. For Blazor and Razor Class Libraries that is the whole point.
+
+A fourth gap is narrower but decisive for the incumbent's users: **watching should not be a hosted
+service.** `Scarlet.Tailwind` should have no runtime package, no `IHostingStartup`, and no long-lived child
+process owned by the application. The supported dev loop is a `Watch` item plus `dotnet watch`, exactly as
+documented for both siblings:
+
+```xml
+<ItemGroup>
+  <Watch Include="Styles\**\*.css" />
+</ItemGroup>
+```
+
+`dotnet watch` then triggers an ordinary build, which runs the Tailwind target that was always going to
+run. Nothing owns a background process, so nothing can leak one. The honest cost is a full MSBuild build
+per save rather than Tailwind's own incremental watch; for anyone who needs that, running
+`dotnet tailwind --watch` as a separate foreground process is the documented escape hatch, and there the
+process is the user's to manage rather than something a web host spawned invisibly.
+
 ## Documentation Requirements
 
 - `README.md` at the repository root routing to the per-package readmes.
 - `src/Scarlet.Tailwind.MSBuild/README.md` with a table of contents, install, the two runtime-acquisition
-  options plus conditional package references, *How the Runtime Is Discovered*, properties, item metadata,
-  task and output parameters, incrementality, `dotnet watch` integration, supported platforms, links.
+  options plus conditional package references, *How the Runtime Is Discovered*, **Writing Your Entry
+  Stylesheet**, properties, item metadata, task and output parameters, incrementality, `dotnet watch`
+  integration, supported platforms, links.
 - `src/Scarlet.Tailwind.Cli/README.md` and a separate RID-package readme.
 - `AGENTS.md` covering build and test commands, the runtime discovery contract, common failure modes, and a
   naming-hygiene note — the siblings were both created by find-and-replace from an earlier repo and both
   shipped scars from it.
 - `DEPLOYMENT.md` documenting version derivation and the pointer-last push rule as runnable commands.
 
-The `dotnet watch` section must carry a warning the siblings do not need: **`--watch` must never be put in
-`TailwindAdditionalArguments`.** Tailwind's watch mode never exits, so the build would hang rather than
-finish, and with the default `TailwindTimeoutMilliseconds` of `0` it would wait indefinitely. The supported
-approach is a `Watch` item pointing at the sources, or a separately managed `dotnet tailwind --watch`
-process.
+The `dotnet watch` section must explain that `--watch`, `-w`, and `--poll` are rejected in
+`TailwindAdditionalArguments`. Tailwind's watch mode never exits, so the build would hang rather than
+finish. The supported approach is a `Watch` item pointing at the sources, or a separately managed
+`dotnet tailwind --watch` process.
 
-## Open Questions
+### Writing Your Entry Stylesheet
 
-- Should `TailwindOptimize` exist at all in v1, or wait for someone to ask for optimised-but-readable output?
-- Should the win-arm64 fallback be silent, a normal-importance message, or opt-out-able via a property?
-- Should the CLI ship an `any` portable package in v1, given the binary is ~110 MB and the download is
-  correspondingly slow on first use?
-- Is one Tailwind process per entry point acceptable, or should multiple entries with identical settings be
-  worth batching if Tailwind ever grows multi-input support?
-- Should the task detect a `tailwind.config.js` with no `@config` directive referencing it and warn? It is
-  a silent no-op in v4 and an easy migration mistake.
-- Should `Scarlet.Tailwind` ever pin a Tailwind version *range* rather than an exact version, given the
-  runtime packages are versioned by Tailwind version?
+This section is required, must appear before the property tables, and is the one piece of documentation
+this package is uniquely positioned to provide.
+
+`Scarlet.Sass` needs nothing like it: Dart Sass compiles the files you name, so there is nothing to explain
+beyond the item. Tailwind is the opposite — the stylesheet is the configuration, and what ends up in the
+output depends on what the scanner finds on disk. That makes it the consumer's business, not an
+implementation detail.
+
+Crucially, **upstream documentation will not tell a .NET developer any of this.** Tailwind's docs are
+written for JavaScript projects, where `node_modules` is in the built-in ignore list and the equivalent
+problem does not arise. Nothing on tailwindcss.com mentions `bin` or `obj`, and the failure mode is silent:
+CSS that quietly refuses to shrink because deleted classes are still being found in stale generated
+sources. A developer hitting it has no reason to suspect the scanner and every reason to suspect this
+package.
+
+The section must cover, in this order:
+
+1. **A minimal working entry stylesheet**, since `@import "tailwindcss"` is the whole of it and a reader
+   arriving from v3 will be looking for a config file that no longer exists.
+2. **The `bin`/`obj` exclusion, with the reason.** Show the two `@source not` lines, then explain that
+   Tailwind's built-in ignore list covers `node_modules` and `.git` but nothing from the .NET toolchain, so
+   `obj` — which holds the Razor compiler's generated `*.g.cs` files from previous builds — is otherwise
+   fair game. State the symptom plainly: classes you deleted keep appearing in the output.
+3. **What `.gitignore` does and does not save you from**, since most projects are already covered and
+   should understand why, rather than copying lines they do not need.
+4. **The v3 `content` array migration**, mapped directly onto `source(none)` plus `@source`, with brace
+   expansion shown, and framed as the stricter opt-in rather than the default.
+5. **`@theme` and `@config`**, briefly, with `@config` marked legacy and carrying the `corePlugins` /
+   `safelist` / `separator` caveat.
+6. **A pointer to `--cwd`**, explaining that `Scarlet.Tailwind` pins the scan root to the project directory
+   so these paths mean the same thing however the build was invoked.
+
+Both samples must use the recommended stylesheet verbatim, so the documented advice is also the tested
+path rather than prose nobody executes.
 
 ## Recommended V1
 
@@ -675,8 +1114,9 @@ process.
    provider, process-start retry.
 2. `Scarlet.Tailwind.MSBuild`: `TailwindCompileTask`, three targets copies, props defaults, the manifest and
    stamp scheme, static web assets recovery, `TailwindClean`.
-3. Seven runtime packages, asset-only, versioned by Tailwind version, each emitting a `TailwindRuntimePack`.
-4. `Scarlet.Tailwind.Cli` packing to nine packages with verbatim argument forwarding and `--scarlet-info`.
+3. Seven runtime packages, asset-only, versioned by Tailwind version, each emitting a `TailwindRuntimePack`
+   (the windows-x64 package emitting two, per *Windows ARM64*).
+4. `Scarlet.Tailwind.Cli` packing to ten packages with verbatim argument forwarding and `--scarlet-info`.
 5. Two samples: one using runtime packages, one using download.
 6. Unit, contract, packaging, integration and CLI test projects, with the reflection-derived wiring test
    from *Testing Requirements* present from the first commit rather than retrofitted.

@@ -1,0 +1,122 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>netstandard2.0</TargetFrameworks>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- NuGet package metadata -->
+    <PackageId>Scarlet.Tailwind.MSBuild</PackageId>
+    <Title>Scarlet.Tailwind.MSBuild - Compile Tailwind CSS in your .NET build</Title>
+    <Authors>ScarletKuro</Authors>
+    <Description>Compile Tailwind CSS during dotnet build, before ASP.NET Core, Blazor, and Razor Class Library static web assets are discovered. Use platform-specific Scarlet.Tailwind.Runtime packages or download the official Tailwind CSS standalone CLI on demand. No Node.js required.</Description>
+    <PackageTags>tailwind;tailwindcss;css;msbuild;dotnet;blazor;razor;aspnetcore;frontend;staticwebassets</PackageTags>
+    <RepositoryUrl>https://github.com/ScarletKuro/Scarlet.Tailwind</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
+
+    <!-- Packaging behavior -->
+    <IsPackable>true</IsPackable>
+    <DevelopmentDependency>True</DevelopmentDependency>
+    <Deterministic>true</Deterministic>
+    <BuildOutputTargetFolder>tools</BuildOutputTargetFolder>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+
+    <!-- The assembly is packed under tools/netstandard2.0/ (see BuildOutputTargetFolder above), not
+         lib/netstandard2.0/, so NuGet can't see it there and warns that netstandard2.0 has no lib/ref
+         assets - a false positive for this MSBuild-task packaging pattern. -->
+    <NoWarn>$(NoWarn);NU5128</NoWarn>
+
+    <!-- Symbols -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- CI -->
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Pack the build props and targets files.
+    These are what make your package an MSBuild task package.
+    They define the tasks and targets consumers can use. -->
+    <None Include="build\**\*">
+      <Pack>true</Pack>
+      <PackagePath>build\</PackagePath>
+    </None>
+    <None Include="buildMultiTargeting\**\*">
+      <Pack>true</Pack>
+      <PackagePath>buildMultiTargeting\</PackagePath>
+    </None>
+
+    <None Include="README.md">
+      <Pack>true</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+
+    <!-- pack the icon -->
+    <None Include="..\..\icon.png">
+      <Pack>true</Pack>
+      <PackagePath>\</PackagePath>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Build.Framework" Version="18.0.2" />
+    <PackageReference Include="Microsoft.Build.Tasks.Core" Version="18.0.2" PrivateAssets="all" />
+    <PackageReference Include="System.IO.Abstractions" Version="22.1.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared implementation, also used by Scarlet.Tailwind.Cli. PrivateAssets keeps its own package
+         references from leaking into this package's dependency list; the assembly itself is packed below. -->
+    <ProjectReference Include="..\Scarlet.Tailwind.Core\Scarlet.Tailwind.Core.csproj" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Pack copied DLLs (We get them from CopyLocalLockFileAssemblies) -->
+  <ItemGroup>
+    <!-- The task will not load without this: UsingTask points at tools/netstandard2.0/Scarlet.Tailwind.MSBuild.dll,
+         which depends on Scarlet.Tailwind.Core.dll sitting next to it. -->
+    <None Include="$(OutputPath)\netstandard2.0\Scarlet.Tailwind.Core.dll" Pack="true" PackagePath="tools/netstandard2.0/" />
+    <None Include="$(OutputPath)\netstandard2.0\System.IO.Abstractions.dll" Pack="true" PackagePath="tools/netstandard2.0/" />
+    <None Include="$(OutputPath)\netstandard2.0\TestableIO.System.IO.Abstractions.dll" Pack="true" PackagePath="tools/netstandard2.0/" />
+    <None Include="$(OutputPath)\netstandard2.0\TestableIO.System.IO.Abstractions.Wrappers.dll" Pack="true" PackagePath="tools/netstandard2.0/" />
+    <None Include="$(OutputPath)\netstandard2.0\Testably.Abstractions.FileSystem.Interface.dll" Pack="true" PackagePath="tools/netstandard2.0/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Scarlet.Tailwind.MSBuild.Tests" />
+    <InternalsVisibleTo Include="Scarlet.Tailwind.MSBuild.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Reference all runtime packages as ProjectReferences during build, but they will be separate NuGet packages -->
+    <!-- ReferenceOutputAssembly="false" because we only need the runtime binaries they produce, not their DLLs -->
+    <ProjectReference Include="..\Scarlet.Tailwind.Runtime.windows-x64\Scarlet.Tailwind.Runtime.windows-x64.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Scarlet.Tailwind.Runtime.linux-x64\Scarlet.Tailwind.Runtime.linux-x64.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Scarlet.Tailwind.Runtime.linux-arm64\Scarlet.Tailwind.Runtime.linux-arm64.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Scarlet.Tailwind.Runtime.linux-x64-musl\Scarlet.Tailwind.Runtime.linux-x64-musl.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Scarlet.Tailwind.Runtime.linux-arm64-musl\Scarlet.Tailwind.Runtime.linux-arm64-musl.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Scarlet.Tailwind.Runtime.darwin-x64\Scarlet.Tailwind.Runtime.darwin-x64.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Scarlet.Tailwind.Runtime.darwin-arm64\Scarlet.Tailwind.Runtime.darwin-arm64.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- Copy runtime binaries from referenced projects to our output directory -->
+  <Target Name="CopyRuntimeBinaries" AfterTargets="Build">
+    <ItemGroup>
+      <RuntimeFiles Include="..\Scarlet.Tailwind.Runtime.windows-x64\bin\$(Configuration)\netstandard2.0\runtimes\**\*.*" />
+      <RuntimeFiles Include="..\Scarlet.Tailwind.Runtime.linux-x64\bin\$(Configuration)\netstandard2.0\runtimes\**\*.*" />
+      <RuntimeFiles Include="..\Scarlet.Tailwind.Runtime.linux-arm64\bin\$(Configuration)\netstandard2.0\runtimes\**\*.*" />
+      <RuntimeFiles Include="..\Scarlet.Tailwind.Runtime.linux-x64-musl\bin\$(Configuration)\netstandard2.0\runtimes\**\*.*" />
+      <RuntimeFiles Include="..\Scarlet.Tailwind.Runtime.linux-arm64-musl\bin\$(Configuration)\netstandard2.0\runtimes\**\*.*" />
+      <RuntimeFiles Include="..\Scarlet.Tailwind.Runtime.darwin-x64\bin\$(Configuration)\netstandard2.0\runtimes\**\*.*" />
+      <RuntimeFiles Include="..\Scarlet.Tailwind.Runtime.darwin-arm64\bin\$(Configuration)\netstandard2.0\runtimes\**\*.*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(RuntimeFiles)" DestinationFolder="$(OutputPath)..\..\runtimes\%(RecursiveDir)" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

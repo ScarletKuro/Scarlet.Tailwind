@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!-- Shared implementation for Scarlet.Tailwind.MSBuild and Scarlet.Tailwind.Cli.
+         It is never published on its own: the MSBuild package hand-packs this assembly into
+         tools/netstandard2.0/, and the CLI bundles it through its publish output. -->
+    <IsPackable>false</IsPackable>
+
+    <!-- netstandard2.0 so the MSBuild task can load it; the CLI targets net10.0 and consumes it happily. -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.IO.Abstractions" Version="22.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The chmod providers are internal; the tests construct them directly. -->
+    <InternalsVisibleTo Include="Scarlet.Tailwind.MSBuild.Tests" />
+    <InternalsVisibleTo Include="Scarlet.Tailwind.MSBuild.IntegrationTests" />
+    <InternalsVisibleTo Include="Scarlet.Tailwind.Cli.Tests" />
+  </ItemGroup>
+
+</Project>

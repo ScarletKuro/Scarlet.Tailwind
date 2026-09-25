@@ -1,0 +1,113 @@
+name: Tailwind Version Bump
+
+on:
+  schedule:
+    # 06:00 UTC on the 1st of every month.
+    - cron: '0 6 1 * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: tailwind-version-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Check for a new Tailwind release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Require master
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/master" ]; then
+            echo "This workflow must run from master so the pushed bump and deploy ref match."
+            exit 1
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          ref: master
+
+      - name: Get current TailwindVersion
+        id: current
+        run: |
+          CURRENT=$(sed -n 's/.*<TailwindVersion>\([^<]*\)<\/TailwindVersion>.*/\1/p' Directory.Build.props)
+          if ! [[ "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Directory.Build.props contains an invalid TailwindVersion: $CURRENT"
+            exit 1
+          fi
+
+          echo "version=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "Current TailwindVersion: $CURRENT"
+
+      - name: Get latest Tailwind release
+        id: latest
+        run: |
+          RELEASE=$(curl -fsSL https://api.github.com/repos/tailwindlabs/tailwindcss/releases/latest)
+          TAG=$(jq -r '.tag_name' <<< "$RELEASE")
+          DRAFT=$(jq -r '.draft' <<< "$RELEASE")
+          PRERELEASE=$(jq -r '.prerelease' <<< "$RELEASE")
+
+          if [ "$DRAFT" != "false" ] || [ "$PRERELEASE" != "false" ]; then
+            echo "Refusing to publish a draft or prerelease Tailwind release: $TAG"
+            exit 1
+          fi
+
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Latest Tailwind release tag is not a stable SemVer tag: $TAG"
+            exit 1
+          fi
+
+          LATEST="${TAG#v}"
+          echo "version=$LATEST" >> "$GITHUB_OUTPUT"
+          echo "Latest Tailwind release: $LATEST"
+
+      - name: Bump TailwindVersion and push
+        id: bump
+        if: steps.current.outputs.version != steps.latest.outputs.version
+        run: |
+          CURRENT="${{ steps.current.outputs.version }}"
+          LATEST="${{ steps.latest.outputs.version }}"
+
+          NEWEST=$(printf '%s\n%s\n' "$CURRENT" "$LATEST" | sort -V | tail -n 1)
+          if [ "$NEWEST" != "$LATEST" ]; then
+            echo "Latest Tailwind release ($LATEST) is not newer than current TailwindVersion ($CURRENT); nothing to publish."
+            echo "bumped=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          sed -i "s/<TailwindVersion>$CURRENT<\/TailwindVersion>/<TailwindVersion>$LATEST<\/TailwindVersion>/" Directory.Build.props
+          # Reset alongside TailwindVersion - see the TailwindCliRevision comment in Directory.Build.props.
+          sed -i "s/<TailwindCliRevision>[0-9]*<\/TailwindCliRevision>/<TailwindCliRevision>0<\/TailwindCliRevision>/" Directory.Build.props
+
+          if ! grep -q "<TailwindVersion>$LATEST</TailwindVersion>" Directory.Build.props; then
+            echo "Failed to update TailwindVersion to $LATEST."
+            exit 1
+          fi
+
+          if ! grep -q "<TailwindCliRevision>0</TailwindCliRevision>" Directory.Build.props; then
+            echo "Failed to reset TailwindCliRevision to 0."
+            exit 1
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Directory.Build.props
+          git commit -m "Bump Tailwind to $LATEST"
+          git push origin HEAD:master
+
+          echo "bumped=true" >> "$GITHUB_OUTPUT"
+
+      # deploy.yml runs the full test matrix (including musl) before its deploy job, and only
+      # publishes if every test job succeeds - so a bad Tailwind release fails loudly here without
+      # anything reaching NuGet.
+      - name: Trigger runtime-and-cli deploy
+        if: steps.bump.outputs.bumped == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run deploy.yml --ref master -f release_target=runtime-and-cli

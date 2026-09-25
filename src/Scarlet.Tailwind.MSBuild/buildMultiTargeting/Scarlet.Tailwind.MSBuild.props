@@ -1,0 +1,17 @@
+<Project>
+  <PropertyGroup>
+    <TailwindEnabled Condition="'$(TailwindEnabled)' == ''">true</TailwindEnabled>
+    <TailwindMinify Condition="'$(TailwindMinify)' == ''">Auto</TailwindMinify>
+    <TailwindOptimize Condition="'$(TailwindOptimize)' == ''">false</TailwindOptimize>
+    <TailwindMap Condition="'$(TailwindMap)' == ''">Auto</TailwindMap>
+    <TailwindSilent Condition="'$(TailwindSilent)' == ''">false</TailwindSilent>
+    <TailwindCwd Condition="'$(TailwindCwd)' == ''"></TailwindCwd>
+    <TailwindAdditionalArguments Condition="'$(TailwindAdditionalArguments)' == ''"></TailwindAdditionalArguments>
+    <TailwindRuntimeDirectory Condition="'$(TailwindRuntimeDirectory)' == ''"></TailwindRuntimeDirectory>
+    <TailwindRuntimeDownload Condition="'$(TailwindRuntimeDownload)' == ''">false</TailwindRuntimeDownload>
+    <TailwindVersionDownload Condition="'$(TailwindVersionDownload)' == ''"></TailwindVersionDownload>
+    <TailwindDownloadMutexTimeoutSeconds Condition="'$(TailwindDownloadMutexTimeoutSeconds)' == ''">300</TailwindDownloadMutexTimeoutSeconds>
+    <TailwindStampDirectory Condition="'$(TailwindStampDirectory)' == ''"></TailwindStampDirectory>
+    <TailwindTimeoutMilliseconds Condition="'$(TailwindTimeoutMilliseconds)' == ''">0</TailwindTimeoutMilliseconds>
+  </PropertyGroup>
+</Project>

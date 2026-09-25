@@ -1,0 +1,32 @@
+<Project>
+  <!-- Common targets for all Tailwind runtime packages -->
+  <!-- Copies tailwindcss into bin/.../runtimes/<rid>/native and packs it into NuGet the same way -->
+  <Target Name="CopyTailwindToRuntimeFolder" AfterTargets="Build">
+    <PropertyGroup>
+      <RidOutputDir>$(TargetDir)runtimes/$(RuntimeRid)/native</RidOutputDir>
+      <TailwindSrc>$(MSBuildProjectDirectory)/$(TailwindFileName)</TailwindSrc>
+      <TailwindDst>$(RidOutputDir)/$(TailwindFileName)</TailwindDst>
+    </PropertyGroup>
+
+    <Message Importance="high" Text="Copying $(TailwindFileName) from: $(TailwindSrc) to: $(TailwindDst)" />
+    <MakeDir Directories="$(RidOutputDir)" />
+
+    <Copy Condition="Exists('$(TailwindSrc)')" SourceFiles="$(TailwindSrc)"
+          DestinationFiles="$(TailwindDst)" SkipUnchangedFiles="true" />
+
+    <!-- Ensure executable bit on Unix -->
+    <Exec Condition="$([MSBuild]::IsOsUnixLike()) and Exists('$(TailwindDst)')" Command="chmod +x '$(TailwindDst)'" />
+  </Target>
+
+  <!-- NuGet packaging layout -->
+  <ItemGroup>
+    <None Include="$(MSBuildProjectDirectory)/$(TailwindFileName)"
+          Pack="true"
+          PackagePath="runtimes/$(RuntimeRid)/native" />
+    <!-- Include version marker file -->
+    <None Include="$(MSBuildProjectDirectory)/$(TailwindFileName).version"
+          Pack="true"
+          PackagePath="runtimes/$(RuntimeRid)/native"
+          Condition="Exists('$(MSBuildProjectDirectory)/$(TailwindFileName).version')" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,29 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/samples/">
+    <Project Path="samples/Scarlet.Tailwind.Sample.Download/Scarlet.Tailwind.Sample.Download.csproj" />
+    <Project Path="samples/Scarlet.Tailwind.Sample/Scarlet.Tailwind.Sample.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Scarlet.Tailwind.Cli/Scarlet.Tailwind.Cli.csproj" />
+    <Project Path="src/Scarlet.Tailwind.Core/Scarlet.Tailwind.Core.csproj" />
+    <Project Path="src/Scarlet.Tailwind.MSBuild/Scarlet.Tailwind.MSBuild.csproj" />
+    <Project Path="src/Scarlet.Tailwind.Runtime.darwin-arm64/Scarlet.Tailwind.Runtime.darwin-arm64.csproj" />
+    <Project Path="src/Scarlet.Tailwind.Runtime.darwin-x64/Scarlet.Tailwind.Runtime.darwin-x64.csproj" />
+    <Project Path="src/Scarlet.Tailwind.Runtime.linux-arm64/Scarlet.Tailwind.Runtime.linux-arm64.csproj" />
+    <Project Path="src/Scarlet.Tailwind.Runtime.linux-arm64-musl/Scarlet.Tailwind.Runtime.linux-arm64-musl.csproj" />
+    <Project Path="src/Scarlet.Tailwind.Runtime.linux-x64/Scarlet.Tailwind.Runtime.linux-x64.csproj" />
+    <Project Path="src/Scarlet.Tailwind.Runtime.linux-x64-musl/Scarlet.Tailwind.Runtime.linux-x64-musl.csproj" />
+    <Project Path="src/Scarlet.Tailwind.Runtime.windows-x64/Scarlet.Tailwind.Runtime.windows-x64.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Scarlet.Tailwind.Cli.Tests/Scarlet.Tailwind.Cli.Tests.csproj" />
+    <Project Path="tests/Scarlet.Tailwind.MSBuild.IntegrationTests/Scarlet.Tailwind.MSBuild.IntegrationTests.csproj" />
+    <Project Path="tests/Scarlet.Tailwind.MSBuild.Tests/Scarlet.Tailwind.MSBuild.Tests.csproj" />
+    <Project Path="tests/Scarlet.Tailwind.ProcessProbe/Scarlet.Tailwind.ProcessProbe.csproj" />
+  </Folder>
+</Solution>

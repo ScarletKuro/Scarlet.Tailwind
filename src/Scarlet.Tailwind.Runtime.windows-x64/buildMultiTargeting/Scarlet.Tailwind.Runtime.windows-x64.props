@@ -1,0 +1,3 @@
+<Project>
+  <Import Project="../build/Scarlet.Tailwind.Runtime.windows-x64.props" />
+</Project>

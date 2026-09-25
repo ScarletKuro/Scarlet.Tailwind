@@ -1,0 +1,94 @@
+<Project>
+  <!-- Development copy, imported directly by the samples and integration tests. It is deliberately NOT
+       packed: it points at bin/ rather than at the package's tools/ folder, and it adds the ProjectReference
+       that builds the task in the first place. Everything below the UsingTask must stay byte-identical to
+       build/Scarlet.Tailwind.MSBuild.targets apart from the one documented DependsOnTargets difference -
+       TailwindTargetsTests asserts exactly that, so a change here without the matching change there fails
+       the build. -->
+  <PropertyGroup>
+    <_TailwindTaskProjectDir>$(MSBuildThisFileDirectory)</_TailwindTaskProjectDir>
+    <_TailwindTaskAssembly>$(_TailwindTaskProjectDir)bin\$(Configuration)\netstandard2.0\Scarlet.Tailwind.MSBuild.dll</_TailwindTaskAssembly>
+    <TailwindRuntimeDirectory Condition="'$(TailwindRuntimeDirectory)' == ''">$(_TailwindTaskProjectDir)bin\runtimes</TailwindRuntimeDirectory>
+    <TailwindEnabled Condition="'$(TailwindEnabled)' == ''">true</TailwindEnabled>
+    <TailwindMinify Condition="'$(TailwindMinify)' == ''">Auto</TailwindMinify>
+    <TailwindOptimize Condition="'$(TailwindOptimize)' == ''">false</TailwindOptimize>
+    <TailwindMap Condition="'$(TailwindMap)' == ''">Auto</TailwindMap>
+    <TailwindSilent Condition="'$(TailwindSilent)' == ''">false</TailwindSilent>
+    <TailwindDownloadMutexTimeoutSeconds Condition="'$(TailwindDownloadMutexTimeoutSeconds)' == ''">300</TailwindDownloadMutexTimeoutSeconds>
+    <TailwindTimeoutMilliseconds Condition="'$(TailwindTimeoutMilliseconds)' == ''">0</TailwindTimeoutMilliseconds>
+  </PropertyGroup>
+
+  <!-- TaskHostFactory runs the task out of process, so the built DLL is not locked by the MSBuild node and
+       can be rebuilt without restarting it. Only worth the process launch in a development loop. -->
+  <UsingTask TaskName="Scarlet.Tailwind.MSBuild.TailwindCompileTask"
+             AssemblyFile="$(_TailwindTaskAssembly)"
+             TaskFactory="TaskHostFactory" />
+
+  <ItemGroup>
+    <ProjectReference Include="$(_TailwindTaskProjectDir)Scarlet.Tailwind.MSBuild.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Target Name="_TailwindResolveStampDirectory">
+    <PropertyGroup>
+      <_TailwindStampDirectory Condition="'$(TailwindStampDirectory)' != ''">$(TailwindStampDirectory)</_TailwindStampDirectory>
+      <_TailwindStampDirectory Condition="'$(_TailwindStampDirectory)' == '' AND '$(IntermediateOutputPath)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'Scarlet.Tailwind'))))</_TailwindStampDirectory>
+    </PropertyGroup>
+  </Target>
+
+  <!-- The one allowed difference from the packed copy: ResolveProjectReferences has to run first, because
+       the task assembly this imports is produced by the ProjectReference above rather than restored from a
+       package. -->
+  <Target Name="RunTailwindBeforeStaticWebAssets"
+          BeforeTargets="DispatchToInnerBuilds;ResolveProjectStaticWebAssets;PreBuildEvent"
+          DependsOnTargets="ResolveProjectReferences;_TailwindResolveStampDirectory"
+          Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND '$(DesignTimeBuild)' != 'true' AND '$(NoBuild)' != 'true' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
+    <TailwindCompileTask Compilations="@(TailwindBeforeStaticWebAssets)"
+                         ProjectDirectory="$(MSBuildProjectDirectory)"
+                         Configuration="$(Configuration)"
+                         Minify="$(TailwindMinify)"
+                         Optimize="$(TailwindOptimize)"
+                         Map="$(TailwindMap)"
+                         Silent="$(TailwindSilent)"
+                         Cwd="$(TailwindCwd)"
+                         AdditionalArguments="$(TailwindAdditionalArguments)"
+                         StampDirectory="$(_TailwindStampDirectory)"
+                         RuntimeDirectory="$(TailwindRuntimeDirectory)"
+                         TailwindRuntimeDownload="$(TailwindRuntimeDownload)"
+                         TailwindVersionDownload="$(TailwindVersionDownload)"
+                         DownloadMutexTimeoutSeconds="$(TailwindDownloadMutexTimeoutSeconds)"
+                         TimeoutMilliseconds="$(TailwindTimeoutMilliseconds)"
+                         RuntimePacks="@(TailwindRuntimePack)">
+      <Output TaskParameter="GeneratedFiles" ItemName="_TailwindGeneratedFiles" />
+      <Output TaskParameter="RemovedFiles" ItemName="_TailwindRemovedFiles" />
+    </TailwindCompileTask>
+
+    <ItemGroup>
+      <Content Remove="@(_TailwindRemovedFiles)" />
+      <None Remove="@(_TailwindRemovedFiles)" />
+      <_TailwindGeneratedContent Include="%(_TailwindGeneratedFiles.RelativePath)" />
+      <_TailwindNewContent Include="@(_TailwindGeneratedContent)" Exclude="@(Content)" />
+      <Content Include="@(_TailwindNewContent)" CopyToPublishDirectory="PreserveNewest" />
+      <FileWrites Include="@(_TailwindGeneratedFiles)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- Hooked to both targets deliberately. In a single-target-framework project CoreClean runs with
+       $(IntermediateOutputPath) set to obj/<config>/<tfm>/, which is where the build wrote the manifest. In
+       a multi-targeted one CoreClean only runs in the inner builds, whose obj/<config>/<tfm>/ never held a
+       manifest - the build ran once in the outer build and wrote to obj/<config>/. Clean does run in the
+       outer build, so hooking it as well is what makes `dotnet clean` remove generated CSS from a
+       multi-targeted project. Whichever hook resolves the other directory finds no manifest and deletes
+       nothing, so running twice is harmless. -->
+  <Target Name="TailwindClean"
+          BeforeTargets="CoreClean;Clean"
+          DependsOnTargets="_TailwindResolveStampDirectory">
+    <ReadLinesFromFile File="$(_TailwindStampDirectory)/Tailwind.generated.txt"
+                       Condition="'$(_TailwindStampDirectory)' != '' AND Exists('$(_TailwindStampDirectory)/Tailwind.generated.txt')">
+      <Output TaskParameter="Lines" ItemName="_TailwindFilesToClean" />
+    </ReadLinesFromFile>
+    <Delete Files="@(_TailwindFilesToClean)" Condition="'@(_TailwindFilesToClean)' != ''" />
+    <Delete Files="$(_TailwindStampDirectory)/Tailwind.generated.txt;$(_TailwindStampDirectory)/Tailwind.settings.stamp"
+            Condition="'$(_TailwindStampDirectory)' != ''" />
+  </Target>
+</Project>

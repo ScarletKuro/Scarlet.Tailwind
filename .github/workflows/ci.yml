@@ -1,0 +1,422 @@
+name: CI
+
+on: [push]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, windows-latest, macos-latest, windows-11-arm]
+      fail-fast: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run tests with coverage
+        run: >
+          dotnet test --no-build --configuration Release
+          --collect:"XPlat Code Coverage" --results-directory ./coverage
+          --logger "junit;LogFilePath=junit/{assembly}.xml"
+
+      # !cancelled() so a genuine test failure's junit output still reaches the aggregated publish-test-
+      # results job below, not just a clean run's.
+      - name: Upload test result artifacts
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-results-${{ matrix.os }}
+          path: tests/**/junit/*.xml
+
+      - name: Verify Scarlet.Tailwind.Sample outputs
+        shell: bash
+        run: |
+          failed=0
+          css="samples/Scarlet.Tailwind.Sample/wwwroot/css/app.css"
+          if [ -f "$css" ]; then
+            echo "✓ CSS was generated successfully"
+            ls -lh "$css"
+          else
+            echo "✗ CSS was not generated"
+            failed=1
+          fi
+          # The class only appears in Program.cs, so finding it proves the scanner ran against the project
+          # rather than emitting a fixed stylesheet.
+          if [ -f "$css" ] && grep -q "max-w-xl" "$css"; then
+            echo "✓ Generated CSS contains a rule for a scanned class"
+          else
+            echo "✗ Generated CSS is missing the scanned class"
+            failed=1
+          fi
+
+          exit $failed
+
+      - name: Verify Scarlet.Tailwind.Sample.Download outputs
+        shell: bash
+        run: |
+          failed=0
+          runtimes="samples/Scarlet.Tailwind.Sample.Download/runtimes"
+          if find "$runtimes" -type f \( -name "tailwindcss" -o -name "tailwindcss.exe" \) | grep -q .; then
+            echo "✓ Runtime was downloaded successfully"
+            find "$runtimes" -type f \( -name "tailwindcss" -o -name "tailwindcss.exe" \) -ls
+          else
+            echo "✗ Runtime was not downloaded"
+            failed=1
+          fi
+          # Written only after the binary is in place, so it distinguishes a complete download from an
+          # interrupted one.
+          if find "$runtimes" -type f -name "*.version" | grep -q .; then
+            echo "✓ Version marker was written"
+          else
+            echo "✗ Version marker is missing"
+            failed=1
+          fi
+          css="samples/Scarlet.Tailwind.Sample.Download/wwwroot/css/app.css"
+          if [ -f "$css" ]; then
+            echo "✓ CSS was generated successfully"
+            ls -lh "$css"
+          else
+            echo "✗ CSS was not generated"
+            failed=1
+          fi
+          # This sample sets an external map path, which is the two-output case.
+          if [ -f "$css.map" ]; then
+            echo "✓ External source map was generated"
+          else
+            echo "✗ External source map was not generated"
+            failed=1
+          fi
+
+          exit $failed
+
+      - name: Pack NuGet packages
+        shell: bash
+        run: |
+          # Use 0.0.1-ci for testing
+          VERSION="0.0.1-ci.${{ github.run_number }}"
+          echo "Packing with version: $VERSION"
+
+          # Extract TailwindVersion from Directory.Build.props
+          TAILWIND_VERSION=$(sed -n 's/.*<TailwindVersion>\([^<]*\)<\/TailwindVersion>.*/\1/p' Directory.Build.props)
+          echo "Runtime package version (TailwindVersion): $TAILWIND_VERSION"
+
+          # Pack the main MSBuild package
+          dotnet pack src/Scarlet.Tailwind.MSBuild/Scarlet.Tailwind.MSBuild.csproj \
+            --no-build \
+            --configuration Release \
+            --output ./packages -p:Version=$VERSION
+
+          # Pack all runtime packages (without --no-build because they need to restore and copy binaries)
+          # Runtime packages use TailwindVersion from their .csproj, no -p:Version override
+          dotnet pack src/Scarlet.Tailwind.Runtime.windows-x64/Scarlet.Tailwind.Runtime.windows-x64.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-x64/Scarlet.Tailwind.Runtime.linux-x64.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-arm64/Scarlet.Tailwind.Runtime.linux-arm64.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-x64-musl/Scarlet.Tailwind.Runtime.linux-x64-musl.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-arm64-musl/Scarlet.Tailwind.Runtime.linux-arm64-musl.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.darwin-x64/Scarlet.Tailwind.Runtime.darwin-x64.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.darwin-arm64/Scarlet.Tailwind.Runtime.darwin-arm64.csproj \
+            --configuration Release \
+            --output ./packages
+
+          # Pack the dotnet tool. Like the runtime packages it versions from TailwindVersion, so no -p:Version;
+          # and no --no-build, because one pack fans out into a build per runtime identifier. This produces
+          # the eight RID packages, the portable 'any' package and the top-level pointer package.
+          dotnet pack src/Scarlet.Tailwind.Cli/Scarlet.Tailwind.Cli.csproj \
+            --configuration Release \
+            --output ./packages
+
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAILWIND_VERSION=$TAILWIND_VERSION" >> $GITHUB_ENV
+
+      - name: List generated packages
+        shell: bash
+        run: ls -lh ./packages/
+
+      # Only the Scarlet.Tailwind.Cli *RID* packages are excluded: each embeds a 60-90 MB Tailwind, so uploading all
+      # eight from every matrix leg would cost gigabytes per push for no diagnostic value - the CLI E2E step
+      # consumes them straight off disk instead. The pointer and 'any' packages are kept: they are a few
+      # hundred KB each and are exactly what you want to inspect when tool resolution misbehaves.
+      # (linux-musl-* RID packages match the linux-* exclusion below too.)
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-${{ matrix.os }}
+          path: |
+            ./packages/*.nupkg
+            ./packages/*.snupkg
+            !./packages/Scarlet.Tailwind.Cli.win-*.nupkg
+            !./packages/Scarlet.Tailwind.Cli.linux-*.nupkg
+            !./packages/Scarlet.Tailwind.Cli.osx-*.nupkg
+
+      - name: E2E Test - Package installation
+        shell: bash
+        run: |
+          chmod +x tests/e2e/package-installation/verify.sh
+          tests/e2e/package-installation/verify.sh "${{ github.workspace }}" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      - name: E2E Test - Monorepo download
+        shell: bash
+        run: |
+          chmod +x tests/e2e/monorepo-download/verify.sh
+          tests/e2e/monorepo-download/verify.sh "${{ github.workspace }}" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      - name: E2E Test - Multi-TFM
+        shell: bash
+        run: |
+          chmod +x tests/e2e/multi-tfm/verify.sh
+          tests/e2e/multi-tfm/verify.sh "${{ github.workspace }}" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      - name: E2E Test - Incremental skipping
+        shell: bash
+        run: |
+          chmod +x tests/e2e/incremental/verify.sh
+          tests/e2e/incremental/verify.sh "${{ github.workspace }}" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      # Runs on every matrix leg deliberately: this is the only thing that proves the correct RID
+      # sub-package is selected on win-arm64 and linux-arm64, and that the embedded Tailwind is executable
+      # after NuGet extraction strips the Unix permission bits.
+      - name: E2E Test - CLI tool
+        shell: bash
+        run: |
+          chmod +x tests/e2e/cli-tool/verify.sh
+          tests/e2e/cli-tool/verify.sh "${{ github.workspace }}" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: ./coverage
+          fail_ci_if_error: false
+          flags: ${{ matrix.os }}
+          name: codecov-${{ matrix.os }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: tests/**/junit/*.xml
+          fail_ci_if_error: false
+          flags: ${{ matrix.os }}
+          name: codecov-test-results-${{ matrix.os }}
+
+  # No GitHub-hosted runner offers musl/Alpine natively, unlike every other platform above which runs on
+  # its own native OS. This runs inside a musl-based .NET SDK container on top of a regular Linux runner
+  # instead, so the musl runtime packages get proven against a real musl libc rather than just unzipped.
+  test-musl:
+    name: Test on Linux musl / Alpine (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    container:
+      image: mcr.microsoft.com/dotnet/sdk:10.0-alpine
+    permissions:
+      contents: read
+    strategy:
+      matrix:
+        include:
+          - arch: x64
+            os: ubuntu-latest
+          - arch: arm64
+            os: ubuntu-24.04-arm
+      fail-fast: false
+
+    steps:
+      - name: Install build prerequisites
+        # gnupg is for codecov-action: it verifies the downloaded Codecov CLI binary's GPG signature before
+        # running it (skippable via skip_validation, but that would drop the integrity check instead).
+        run: apk add --no-cache bash curl unzip icu-libs git gnupg
+
+      # actions/checkout is a JS action, and the runner's bundled Node build for Alpine containers only
+      # covers x64 - on the arm64 leg it fails with "JavaScript Actions in Alpine containers are only
+      # supported on x64 Linux runners". git is a native binary, so it works on both legs regardless.
+      - name: Checkout code
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git init .
+          git remote add origin "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git"
+          git fetch --depth 1 origin "${{ github.sha }}"
+          git checkout FETCH_HEAD
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Run tests with coverage
+        run: >
+          dotnet test --no-build --configuration Release
+          --collect:"XPlat Code Coverage" --results-directory ./coverage
+          --logger "junit;LogFilePath=junit/{assembly}.xml"
+
+      # !cancelled() so a genuine test failure's junit output still reaches the aggregated publish-test-
+      # results job below; matrix.arch == 'x64' for the same JS-action-on-Alpine-arm64 restriction as the
+      # checkout step above (actions/upload-artifact is a JS action too).
+      - name: Upload test result artifacts
+        if: ${{ !cancelled() && matrix.arch == 'x64' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: junit-results-musl-${{ matrix.arch }}
+          path: tests/**/junit/*.xml
+
+      - name: Pack NuGet packages
+        shell: bash
+        run: |
+          # Use 0.0.1-ci for testing
+          VERSION="0.0.1-ci.${{ github.run_number }}"
+          echo "Packing with version: $VERSION"
+
+          # Extract TailwindVersion from Directory.Build.props
+          TAILWIND_VERSION=$(sed -n 's/.*<TailwindVersion>\([^<]*\)<\/TailwindVersion>.*/\1/p' Directory.Build.props)
+          echo "Runtime package version (TailwindVersion): $TAILWIND_VERSION"
+
+          # Needed by the package-installation E2E test below, which references it by name/version.
+          dotnet pack src/Scarlet.Tailwind.MSBuild/Scarlet.Tailwind.MSBuild.csproj \
+            --no-build \
+            --configuration Release \
+            --output ./packages -p:Version=$VERSION
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-x64-musl/Scarlet.Tailwind.Runtime.linux-x64-musl.csproj \
+            --configuration Release \
+            --output ./packages
+
+          dotnet pack src/Scarlet.Tailwind.Runtime.linux-arm64-musl/Scarlet.Tailwind.Runtime.linux-arm64-musl.csproj \
+            --configuration Release \
+            --output ./packages
+
+          # Fans out into a build per runtime identifier, same as on the native-OS legs; only the two musl
+          # RID packages, the portable 'any' package and the pointer package are of interest here.
+          dotnet pack src/Scarlet.Tailwind.Cli/Scarlet.Tailwind.Cli.csproj \
+            --configuration Release \
+            --output ./packages
+
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "TAILWIND_VERSION=$TAILWIND_VERSION" >> $GITHUB_ENV
+
+      - name: List generated packages
+        run: ls -lh ./packages/
+
+      # Proves Scarlet.Tailwind.MSBuild itself resolves and runs a musl Tailwind via the TailwindRuntimePack contract,
+      # not just that the CLI tool does.
+      #
+      # $GITHUB_WORKSPACE (the env var), not ${{ github.workspace }} (the expression): inside a job-level
+      # container the expression resolves to the HOST path (/home/runner/work/...), which does not exist
+      # inside the container's filesystem, while the env var correctly reports the container-side mount
+      # (/__w/...) that dotnet pack actually wrote ./packages under.
+      - name: E2E Test - Package installation
+        shell: bash
+        run: |
+          chmod +x tests/e2e/package-installation/verify.sh
+          tests/e2e/package-installation/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      # TailwindDownloader's asset naming covers musl (tailwindcss-linux-*-musl), so the shared download mutex /
+      # atomic-publish flow this test exercises is just as applicable under Alpine as under glibc.
+      - name: E2E Test - Monorepo download
+        shell: bash
+        run: |
+          chmod +x tests/e2e/monorepo-download/verify.sh
+          tests/e2e/monorepo-download/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      # select_runtime_package_from_rid already maps linux-musl-x64/arm64 to the musl runtime packages, so
+      # this proves the same RID-based pack selection on musl that the other CI legs prove for glibc.
+      - name: E2E Test - Multi-TFM
+        shell: bash
+        run: |
+          chmod +x tests/e2e/multi-tfm/verify.sh
+          tests/e2e/multi-tfm/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      - name: E2E Test - Incremental skipping
+        shell: bash
+        run: |
+          chmod +x tests/e2e/incremental/verify.sh
+          tests/e2e/incremental/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      # This is what actually proves the musl binaries execute on real musl libc, not just that the zip
+      # unpacked correctly: it installs the tool, and dotnet --info inside this container reports a
+      # linux-musl-* RID, so the CLI's generic RID detection (tests/e2e/cli-tool/verify.sh) picks the
+      # musl-specific package and runs the embedded Tailwind for real.
+      - name: E2E Test - CLI tool
+        shell: bash
+        run: |
+          chmod +x tests/e2e/cli-tool/verify.sh
+          tests/e2e/cli-tool/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+
+      - name: Upload coverage to Codecov
+        if: matrix.arch == 'x64'
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: ./coverage
+          fail_ci_if_error: false
+          flags: musl-${{ matrix.arch }}
+          name: codecov-musl-${{ matrix.arch }}
+
+      # !cancelled() so this still uploads on a genuine test failure; matrix.arch == 'x64' for the same
+      # JS-action-on-Alpine-arm64 restriction as the coverage upload step above.
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() && matrix.arch == 'x64' }}
+        uses: codecov/codecov-action@v7
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          report_type: test_results
+          files: tests/**/junit/*.xml
+          fail_ci_if_error: false
+          flags: musl-${{ matrix.arch }}
+          name: codecov-test-results-musl-${{ matrix.arch }}
+
+  # A single check run + PR comment aggregating every leg's junit results (the musl-arm64 leg excluded,
+  # per the artifact upload it never produces above). Runs once on a plain Linux runner regardless of
+  # which OS the results came from - it only ever parses the downloaded XML, never executes tests itself.
+  publish-test-results:
+    name: Publish test results
+    needs: [test, test-musl]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      checks: write
+      pull-requests: write
+    steps:
+      - name: Download junit result artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: junit-results-*
+          path: artifacts
+
+      - name: Publish test results
+        if: ${{ !cancelled() }}
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        with:
+          files: "artifacts/**/*.xml"

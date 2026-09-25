@@ -1,0 +1,79 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="8.0.1">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="JunitXml.TestLogger" Version="8.0.0">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.Build.Framework" Version="18.0.2" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" Version="18.0.2" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared across the unit and integration test projects; see tests/Shared. -->
+    <Compile Include="..\Shared\*.cs" LinkBase="Shared" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+    <Using Include="Scarlet.Tailwind.Testing" />
+    <!-- The shared implementation lives in Scarlet.Tailwind.Core; before it was extracted these types
+         resolved implicitly through the Scarlet.Tailwind.MSBuild.Tests namespace nesting. -->
+    <Using Include="Scarlet.Tailwind.Core" />
+    <Using Include="Scarlet.Tailwind.Core.Providers" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Scarlet.Tailwind.Core\Scarlet.Tailwind.Core.csproj" />
+    <ProjectReference Include="..\..\src\Scarlet.Tailwind.MSBuild\Scarlet.Tailwind.MSBuild.csproj" />
+    <ProjectReference Include="..\Scarlet.Tailwind.ProcessProbe\Scarlet.Tailwind.ProcessProbe.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Copy test assets to output directory -->
+    <None Include="TestAssets\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Copy runtime binaries from MSBuild project to test output for integration tests -->
+  <Target Name="CopyRuntimeBinariesForTests" AfterTargets="Build">
+    <ItemGroup>
+      <!-- Copy runtimes from the MSBuild project's bin directory (not configuration-specific) -->
+      <RuntimeFiles Include="..\..\src\Scarlet.Tailwind.MSBuild\bin\runtimes\**\*.*" />
+    </ItemGroup>
+    
+    <Copy SourceFiles="@(RuntimeFiles)" 
+          DestinationFolder="$(OutputPath)runtimes\%(RecursiveDir)" 
+          SkipUnchangedFiles="true"
+          Condition="'@(RuntimeFiles)' != ''" />
+    
+    <Message Importance="high" Text="Copied @(RuntimeFiles->Count()) runtime files to test output" Condition="'@(RuntimeFiles)' != ''" />
+  </Target>
+
+  <Target Name="CopyProcessProbeForTests" AfterTargets="Build">
+    <ItemGroup>
+      <ProcessProbeFiles Include="..\Scarlet.Tailwind.ProcessProbe\bin\$(Configuration)\net10.0\tailwindcss*" />
+    </ItemGroup>
+
+    <Copy SourceFiles="@(ProcessProbeFiles)"
+          DestinationFolder="$(OutputPath)ProcessProbe"
+          SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>

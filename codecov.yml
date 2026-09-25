@@ -1,0 +1,17 @@
+comment:
+  layout: "reach,diff,flags,tree,reach,components"
+
+component_management:
+  individual_components:
+    - component_id: core
+      name: Core
+      paths:
+        - src/Scarlet.Tailwind.Core/**
+    - component_id: msbuild-task
+      name: MSBuild Task
+      paths:
+        - src/Scarlet.Tailwind.MSBuild/**
+    - component_id: cli
+      name: CLI
+      paths:
+        - src/Scarlet.Tailwind.Cli/**

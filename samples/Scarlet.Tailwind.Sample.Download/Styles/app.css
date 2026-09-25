@@ -1,0 +1,7 @@
+@import "tailwindcss";
+
+/* Tailwind's built-in ignore list covers node_modules and .git, but nothing from the .NET
+   toolchain. obj holds the Razor compiler's generated *.g.cs files from previous builds, so
+   without these two lines a class deleted this morning keeps appearing in the output. */
+@source not "./bin";
+@source not "./obj";
