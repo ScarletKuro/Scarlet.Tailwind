@@ -9,8 +9,7 @@ set -euo pipefail
 # to be clever about skipping would fail exactly here, because the stylesheet did not change - only a file
 # the scanner reads did.
 #
-# The scenario also covers the settings stamp: changing a property must discard the previous output rather
-# than leave it in place.
+# The scenario also proves that changing a property reaches Tailwind and rewrites the output.
 #
 # Usage: ./verify.sh <workspace-path> <package-version> <runtime-version>
 
@@ -150,7 +149,7 @@ else
 fi
 
 section "Build After Changing a Setting"
-# TailwindMinify is a settings-stamp input, so the previous output must be discarded rather than reused.
+# The existing output must be overwritten with the newly requested minified form.
 dotnet build --no-restore --verbosity minimal -p:TailwindMinify=true || fatal "Third build failed"
 echo "✓ Third build completed with TailwindMinify=true"
 

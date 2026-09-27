@@ -29,13 +29,13 @@ public class TailwindTargetsTests
             ["TailwindRuntimeDownload"] = "false",
             ["TailwindVersionDownload"] = string.Empty,
             ["TailwindDownloadMutexTimeoutSeconds"] = "300",
-            ["TailwindStampDirectory"] = string.Empty,
+            ["TailwindManifestDirectory"] = string.Empty,
             ["TailwindTimeoutMilliseconds"] = "0"
         };
 
     private static readonly string[] TargetNames =
     [
-        "_TailwindResolveStampDirectory",
+        "_TailwindResolveManifestDirectory",
         "RunTailwindBeforeStaticWebAssets",
         "TailwindClean"
     ];
@@ -112,7 +112,7 @@ public class TailwindTargetsTests
     [Theory]
     // The development copy has to build the task assembly before it can call into it, so it prefixes one
     // extra dependency; the packaged copy ships that assembly and must not carry it.
-    [InlineData("_TailwindResolveStampDirectory", null)]
+    [InlineData("_TailwindResolveManifestDirectory", null)]
     [InlineData("TailwindClean", null)]
     [InlineData("RunTailwindBeforeStaticWebAssets", "ResolveProjectReferences")]
     public void DevelopmentTargets_ShouldStayInSyncWithPackagedTargets(string targetName, string? developmentOnlyPrefix)

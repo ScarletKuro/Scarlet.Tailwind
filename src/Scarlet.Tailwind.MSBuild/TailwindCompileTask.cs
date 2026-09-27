@@ -36,7 +36,7 @@ public sealed class TailwindCompileTask : Task
     public string Silent { get; set; } = "false";
     public string Cwd { get; set; } = string.Empty;
     public string AdditionalArguments { get; set; } = string.Empty;
-    public string StampDirectory { get; set; } = string.Empty;
+    public string ManifestDirectory { get; set; } = string.Empty;
     public string? RuntimeDirectory { get; set; }
     public bool TailwindRuntimeDownload { get; set; }
     public string? TailwindVersionDownload { get; set; }
@@ -87,22 +87,11 @@ public sealed class TailwindCompileTask : Task
             }
 
             var tailwindPath = ResolveTailwind(fileSystem);
-            var stampDirectory = ResolveStampDirectory();
-            var manifestPath = Path.Combine(stampDirectory, "Tailwind.generated.txt");
-            var stampPath = Path.Combine(stampDirectory, "Tailwind.settings.stamp");
-            var stampContent = CreateStampContent(entries);
-            var forceRegenerate = IsStampStale(fileSystem, stampPath, stampContent);
+            var manifestDirectory = ResolveManifestDirectory();
+            var manifestPath = Path.Combine(manifestDirectory, "Tailwind.generated.txt");
             var expectedFiles = entries.SelectMany(static entry => entry.ExpectedOutputs).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             var previousFiles = ReadManifest(fileSystem, manifestPath);
             var removedFiles = previousFiles.Except(expectedFiles, StringComparer.OrdinalIgnoreCase).ToArray();
-
-            if (forceRegenerate)
-            {
-                foreach (var output in expectedFiles)
-                {
-                    fileSystem.File.TryDeleteFile(output);
-                }
-            }
 
             foreach (var stale in removedFiles)
             {
@@ -134,8 +123,7 @@ public sealed class TailwindCompileTask : Task
                 }
             }
 
-            fileSystem.Directory.CreateDirectory(stampDirectory);
-            fileSystem.File.WriteAllText(stampPath, stampContent);
+            fileSystem.Directory.CreateDirectory(manifestDirectory);
             fileSystem.File.WriteAllLines(manifestPath, expectedFiles);
 
             GeneratedFiles = expectedFiles.Select(CreateGeneratedFileItem).ToArray();
@@ -480,48 +468,14 @@ public sealed class TailwindCompileTask : Task
         }
     }
 
-    private string ResolveStampDirectory()
+    private string ResolveManifestDirectory()
     {
-        if (!string.IsNullOrWhiteSpace(StampDirectory))
+        if (!string.IsNullOrWhiteSpace(ManifestDirectory))
         {
-            return ResolvePath(ProjectDirectory, StampDirectory);
+            return ResolvePath(ProjectDirectory, ManifestDirectory);
         }
 
         return Path.Combine(ProjectDirectory, "obj", "Scarlet.Tailwind");
-    }
-
-    private static bool IsStampStale(IFileSystem fileSystem, string stampPath, string content)
-    {
-        return !fileSystem.File.Exists(stampPath)
-               || !string.Equals(fileSystem.File.ReadAllText(stampPath), content, StringComparison.Ordinal);
-    }
-
-    private string CreateStampContent(IReadOnlyList<TailwindEntry> entries)
-    {
-        var builder = new StringBuilder();
-        builder.AppendLine("Scarlet.Tailwind.MSBuild settings stamp");
-        builder.AppendLine($"Configuration={Configuration}");
-        builder.AppendLine($"RuntimeDirectory={RuntimeDirectory}");
-        builder.AppendLine($"RuntimeDownload={TailwindRuntimeDownload}");
-        builder.AppendLine($"VersionDownload={TailwindVersionDownload}");
-
-        foreach (var pack in RuntimePacks ?? Array.Empty<ITaskItem>())
-        {
-            builder.AppendLine(string.Join(
-                "|",
-                pack.ItemSpec,
-                pack.GetMetadata(TailwindRuntimePack.RidMetadataName),
-                pack.GetMetadata(TailwindRuntimePack.NativeRidMetadataName),
-                pack.GetMetadata(TailwindRuntimePack.RuntimesPathMetadataName),
-                pack.GetMetadata(TailwindRuntimePack.PriorityMetadataName)));
-        }
-
-        foreach (var entry in entries)
-        {
-            builder.AppendLine($"{entry.InputPath}|{entry.OutputPath}|{entry.MapPath}|{entry.WorkingDirectory}|{entry.Settings}");
-        }
-
-        return builder.ToString();
     }
 
     private static IReadOnlyList<string> ReadManifest(IFileSystem fileSystem, string manifestPath)

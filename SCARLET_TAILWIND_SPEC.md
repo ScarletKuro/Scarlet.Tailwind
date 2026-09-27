@@ -28,7 +28,7 @@ integration follows Sass.
 - Run Tailwind before static web asset discovery so generated `wwwroot` files are discovered by the SDK.
 - Package generated RCL assets under `staticwebassets/` when the project is packed.
 - Support `dotnet pack --no-build` after a previous build without re-running Tailwind.
-- Support `dotnet clean` for generated CSS, source maps, manifests, and stamp files.
+- Support `dotnet clean` for generated CSS, source maps, and manifests.
 - Provide pinned Tailwind binaries through platform-specific NuGet runtime packages.
 - Provide optional download-on-demand mode for environments that prefer not to reference runtime packages.
 - Verify downloaded binaries against the checksums Tailwind publishes.
@@ -407,7 +407,7 @@ question when both are set, and would diverge from the item contract both siblin
 | `TailwindRuntimeDownload` | `false` | Download the runtime instead of using runtime packs |
 | `TailwindVersionDownload` | empty | Version to download. Empty resolves the latest GitHub release |
 | `TailwindDownloadMutexTimeoutSeconds` | `300` | Timeout for cross-process download coordination |
-| `TailwindStampDirectory` | empty | Settings stamp and manifest directory. Empty means `$(IntermediateOutputPath)\Scarlet.Tailwind` |
+| `TailwindManifestDirectory` | empty | Generated-files manifest directory. Empty means `$(IntermediateOutputPath)\Scarlet.Tailwind` |
 | `TailwindTimeoutMilliseconds` | `0` | Maximum time per invocation. `0` waits indefinitely |
 
 `Auto` resolves from `$(Configuration)`:
@@ -670,17 +670,18 @@ CSS missing the classes someone just added.
 Always running is therefore the correct default, and the cost should be stated honestly in the README: a
 Tailwind invocation per build, typically a few hundred milliseconds.
 
-A settings stamp and a generated-files manifest should still be written, for two jobs that are not
-skipping:
+A generated-files manifest should still be written for a job unrelated to skipping:
 
-- `<stampDirectory>/Tailwind.settings.stamp` records configuration, resolved settings per entry, runtime
-  selection and pack list. When it changes, expected outputs are deleted before the run so nothing stale
-  survives a settings change.
-- `<stampDirectory>/Tailwind.generated.txt` records every file the task produced, one absolute path per
+- `<manifestDirectory>/Tailwind.generated.txt` records every file the task produced, one absolute path per
   line. It drives stale-output removal when an entry point is renamed or removed, and it is what `Clean`
   reads.
 
-Both should be written only after a zero exit code, so a failed build leaves no success stamp.
+The manifest should be written only after every invocation exits successfully, so a failed build does not
+record outputs it did not produce.
+
+There is deliberately no settings stamp. Tailwind always recompiles and overwrites its explicit output, so
+deleting that output when settings change does not force any work that would otherwise be skipped. This is
+different from Sass, whose settings stamp is required to force its internal `--update` check to regenerate.
 
 If a team later wants opt-in skipping, `Scarlet.Bun`'s `Inputs`/`Outputs`/`StampFile` scheme is the model —
 it is opt-in precisely because Bun also cannot know its own inputs. That is a deliberate v2 question, not a
@@ -689,13 +690,13 @@ v1 omission.
 ## Cleaning
 
 ```xml
-<Target Name="TailwindClean" BeforeTargets="CoreClean;Clean" DependsOnTargets="_TailwindResolveStampDirectory">
-  <ReadLinesFromFile File="$(_TailwindStampDirectory)/Tailwind.generated.txt"
-                     Condition="Exists('$(_TailwindStampDirectory)/Tailwind.generated.txt')">
+<Target Name="TailwindClean" BeforeTargets="CoreClean;Clean" DependsOnTargets="_TailwindResolveManifestDirectory">
+  <ReadLinesFromFile File="$(_TailwindManifestDirectory)/Tailwind.generated.txt"
+                     Condition="Exists('$(_TailwindManifestDirectory)/Tailwind.generated.txt')">
     <Output TaskParameter="Lines" ItemName="_TailwindFilesToClean" />
   </ReadLinesFromFile>
   <Delete Files="@(_TailwindFilesToClean)" Condition="'@(_TailwindFilesToClean)' != ''" />
-  <Delete Files="$(_TailwindStampDirectory)/Tailwind.generated.txt;$(_TailwindStampDirectory)/Tailwind.settings.stamp" />
+  <Delete Files="$(_TailwindManifestDirectory)/Tailwind.generated.txt" />
 </Target>
 ```
 
@@ -816,7 +817,7 @@ public sealed class TailwindCompileTask : Microsoft.Build.Utilities.Task
     public string Silent { get; set; } = "false";
     public string Cwd { get; set; } = string.Empty;
     public string AdditionalArguments { get; set; } = string.Empty;
-    public string StampDirectory { get; set; } = string.Empty;
+    public string ManifestDirectory { get; set; } = string.Empty;
     public string? RuntimeDirectory { get; set; }
     public bool TailwindRuntimeDownload { get; set; }
     public string? TailwindVersionDownload { get; set; }
@@ -844,16 +845,16 @@ object. `ProcessStartRetry` handles the ETXTBSY window where a just-written exec
 ## Build Target Sketch
 
 ```xml
-<Target Name="_TailwindResolveStampDirectory">
+<Target Name="_TailwindResolveManifestDirectory">
   <PropertyGroup>
-    <_TailwindStampDirectory Condition="'$(TailwindStampDirectory)' != ''">$(TailwindStampDirectory)</_TailwindStampDirectory>
-    <_TailwindStampDirectory Condition="'$(_TailwindStampDirectory)' == '' AND '$(IntermediateOutputPath)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'Scarlet.Tailwind'))))</_TailwindStampDirectory>
+    <_TailwindManifestDirectory Condition="'$(TailwindManifestDirectory)' != ''">$(TailwindManifestDirectory)</_TailwindManifestDirectory>
+    <_TailwindManifestDirectory Condition="'$(_TailwindManifestDirectory)' == '' AND '$(IntermediateOutputPath)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'Scarlet.Tailwind'))))</_TailwindManifestDirectory>
   </PropertyGroup>
 </Target>
 
 <Target Name="RunTailwindBeforeStaticWebAssets"
         BeforeTargets="DispatchToInnerBuilds;ResolveProjectStaticWebAssets;PreBuildEvent"
-        DependsOnTargets="_TailwindResolveStampDirectory"
+        DependsOnTargets="_TailwindResolveManifestDirectory"
         Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND '$(DesignTimeBuild)' != 'true' AND '$(NoBuild)' != 'true' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
   <TailwindCompileTask Compilations="@(TailwindBeforeStaticWebAssets)"
                        ProjectDirectory="$(MSBuildProjectDirectory)"
@@ -864,7 +865,7 @@ object. `ProcessStartRetry` handles the ETXTBSY window where a just-written exec
 
 Four parts of that condition are load-bearing and should each be commented in the shipped file:
 
-- `_TailwindResolveStampDirectory` must be a **target**, not a file-scope `PropertyGroup`, because
+- `_TailwindResolveManifestDirectory` must be a **target**, not a file-scope `PropertyGroup`, because
   `$(IntermediateOutputPath)` is not set when the file is imported, only by the time a target runs. Both
   entry points depend on it rather than duplicating it, so they cannot answer differently.
 - The `TargetFrameworks`/`TargetFramework` clause runs the target once in a multi-TFM outer build and skips
@@ -894,7 +895,7 @@ single test deriving the expected attribute set by reflection over the task's pu
 and comparing it against each targets copy, so a new parameter cannot be added without being wired.
 
 Name every one: `Compilations`, `ProjectDirectory`, `Configuration`, `Minify`, `Optimize`, `Map`, `Cwd`,
-`Silent`, `AdditionalArguments`, `StampDirectory`, `RuntimeDirectory`, `TailwindRuntimeDownload`,
+`Silent`, `AdditionalArguments`, `ManifestDirectory`, `RuntimeDirectory`, `TailwindRuntimeDownload`,
 `TailwindVersionDownload`, `DownloadMutexTimeoutSeconds`, `TimeoutMilliseconds`, `RuntimePacks`.
 
 And every item metadata value: `OutputPath`, `Minify`, `Optimize`, `Map`, `Silent`, `Cwd`,
@@ -936,7 +937,7 @@ report everything broken, not just the first thing.
 `TaskLifetimeGate` and `OutputCollector` including the method-scope drain-event declarations;
 `ProcessStartRetry`; the `*RuntimePack` item contract and its selection ordering; the Core/MSBuild/Cli split
 with the `tools/netstandard2.0/` packing rule and `TaskPackagingTests`; the packaged/development targets
-pair guarded by an XML comparison test; the `_*ResolveStampDirectory` target-not-PropertyGroup trick; the
+pair guarded by an XML comparison test; the `_*ResolveManifestDirectory` target-not-PropertyGroup trick; the
 `NoBuild` guard; the run-before-discovery static web assets strategy with a project-relative `Content`
 glob; the CLI's pointer-last push ordering; the shared test helpers (`RepositoryRoot`, `DotnetCli`,
 `TempWorkspace`).
@@ -1113,7 +1114,7 @@ path rather than prose nobody executes.
    resolver with the win-arm64 fallback, downloader with staged publish and checksum verification, chmod
    provider, process-start retry.
 2. `Scarlet.Tailwind.MSBuild`: `TailwindCompileTask`, three targets copies, props defaults, the manifest and
-   stamp scheme, static web assets recovery, `TailwindClean`.
+   generated-files manifest, static web assets recovery, `TailwindClean`.
 3. Seven runtime packages, asset-only, versioned by Tailwind version, each emitting a `TailwindRuntimePack`
    (the windows-x64 package emitting two, per *Windows ARM64*).
 4. `Scarlet.Tailwind.Cli` packing to ten packages with verbatim argument forwarding and `--scarlet-info`.

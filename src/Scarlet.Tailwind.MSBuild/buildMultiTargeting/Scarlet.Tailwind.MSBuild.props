@@ -11,7 +11,7 @@
     <TailwindRuntimeDownload Condition="'$(TailwindRuntimeDownload)' == ''">false</TailwindRuntimeDownload>
     <TailwindVersionDownload Condition="'$(TailwindVersionDownload)' == ''"></TailwindVersionDownload>
     <TailwindDownloadMutexTimeoutSeconds Condition="'$(TailwindDownloadMutexTimeoutSeconds)' == ''">300</TailwindDownloadMutexTimeoutSeconds>
-    <TailwindStampDirectory Condition="'$(TailwindStampDirectory)' == ''"></TailwindStampDirectory>
+    <TailwindManifestDirectory Condition="'$(TailwindManifestDirectory)' == ''"></TailwindManifestDirectory>
     <TailwindTimeoutMilliseconds Condition="'$(TailwindTimeoutMilliseconds)' == ''">0</TailwindTimeoutMilliseconds>
   </PropertyGroup>
 </Project>

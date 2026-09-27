@@ -25,7 +25,7 @@ tests/e2e/
 │   ├── verify.sh                    # Multi-target framework Razor Class Library E2E test
 │   └── templates/                   # Template files for the multi-TFM test
 ├── incremental/
-│   ├── verify.sh                    # Rescan, settings-stamp and clean E2E test
+│   ├── verify.sh                    # Rescan, setting-change and clean E2E test
 │   └── templates/                   # Template files for the incremental test
 ├── cli-tool/
 │   ├── verify.sh                    # dotnet tailwind .NET tool E2E test

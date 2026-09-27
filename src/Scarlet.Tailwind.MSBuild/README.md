@@ -332,7 +332,7 @@ your project directory. Change it with [`TailwindCwd`](#properties) if you need 
 | `TailwindRuntimeDownload` | `false` | Download the runtime instead of using runtime packs |
 | `TailwindVersionDownload` | empty | Version to download. Empty means latest |
 | `TailwindDownloadMutexTimeoutSeconds` | `300` | Timeout for cross-process download coordination |
-| `TailwindStampDirectory` | `$(IntermediateOutputPath)\Scarlet.Tailwind` | Settings stamp and manifest directory |
+| `TailwindManifestDirectory` | `$(IntermediateOutputPath)\Scarlet.Tailwind` | Generated-files manifest directory |
 | `TailwindTimeoutMilliseconds` | `0` | Maximum time per invocation. `0` waits indefinitely |
 
 `Auto` resolves from `$(Configuration)`:
@@ -385,7 +385,7 @@ directly only if you need a compile outside that target.
 | Parameter | Required | Description | Default |
 | --- | --- | --- | --- |
 | `Compilations` | Yes | The items to compile, normally `@(TailwindBeforeStaticWebAssets)` | - |
-| `ProjectDirectory` | Yes | Directory that relative input, output and stamp paths resolve against, normally `$(MSBuildProjectDirectory)` | - |
+| `ProjectDirectory` | Yes | Directory that relative input, output and manifest paths resolve against, normally `$(MSBuildProjectDirectory)` | - |
 | `Configuration` | No | Drives the `Auto` defaults for `Minify` and `Map` | `Debug` |
 | `Minify` | No | `Auto`, `true`, or `false`; adds `--minify` when enabled | `Auto` |
 | `Optimize` | No | Adds `--optimize` when enabled and not minifying | `false` |
@@ -393,7 +393,7 @@ directly only if you need a compile outside that target.
 | `Silent` | No | Adds `--silent` | `false` |
 | `Cwd` | No | Tailwind scan root, resolved against `ProjectDirectory` | project directory |
 | `AdditionalArguments` | No | Extra Tailwind arguments, subject to the restrictions above | empty |
-| `StampDirectory` | No | Directory for the settings stamp and generated-file manifest | `obj/Scarlet.Tailwind` |
+| `ManifestDirectory` | No | Directory for the generated-files manifest | `obj/Scarlet.Tailwind` |
 | `RuntimeDirectory` | No | Explicit runtime directory. Overrides `RuntimePacks`; required when `TailwindRuntimeDownload` is true | null |
 | `RuntimePacks` | No | Runtimes available to the build, normally `@(TailwindRuntimePack)`. See [How the Runtime Is Discovered](#how-the-runtime-is-discovered) | empty |
 | `TailwindRuntimeDownload` | No | Download Tailwind instead of using runtime packs | `false` |
@@ -417,14 +417,11 @@ Tailwind is fast and knows its own inputs — including every file it scans, whi
 so the target has no `Inputs`/`Outputs` and runs on every build. Trying to out-guess the scanner is how a
 wrapper ends up serving stale CSS.
 
-What the task does track is a **settings stamp**. Change a property, and the previous outputs are deleted
-before the rebuild rather than being overwritten in place.
-
 ## Cleaning
 
-`dotnet clean` removes the generated CSS, any external source map, the manifest and the settings stamp. The
-task writes a manifest of what it generated, and `TailwindClean` reads it — so cleaning removes exactly what
-was produced, including outputs whose names came from properties.
+`dotnet clean` removes the generated CSS, any external source map, and the manifest. The task writes a
+manifest of what it generated, and `TailwindClean` reads it — so cleaning removes exactly what was produced,
+including outputs whose names came from properties.
 
 ## dotnet watch Integration
 
