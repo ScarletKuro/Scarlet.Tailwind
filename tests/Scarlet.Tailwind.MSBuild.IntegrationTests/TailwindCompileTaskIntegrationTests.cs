@@ -332,7 +332,7 @@ public class TailwindCompileTaskIntegrationTests
     }
 
     [Fact]
-    public void CompileTask_WritesAManifestAndASettingsStamp()
+    public void CompileTask_WritesAManifestWithoutASettingsStamp()
     {
         using var workspace = CreateWorkspace("compile-manifest");
 
@@ -341,42 +341,39 @@ public class TailwindCompileTaskIntegrationTests
         Assert.True(task.Execute());
 
         var manifest = workspace.PathTo("obj", "Scarlet.Tailwind", "Tailwind.generated.txt");
-        var stamp = workspace.PathTo("obj", "Scarlet.Tailwind", "Tailwind.settings.stamp");
 
         Assert.True(File.Exists(manifest), "Clean reads the manifest to know what to delete.");
-        Assert.True(File.Exists(stamp));
+        Assert.False(File.Exists(workspace.PathTo("obj", "Scarlet.Tailwind", "Tailwind.settings.stamp")));
         Assert.Equal(
             [workspace.PathTo("wwwroot", "css", "app.css")],
             File.ReadAllLines(manifest));
     }
 
     [Fact]
-    public void CompileTask_WithStampDirectorySet_WritesTheStampAndManifestThere()
+    public void CompileTask_WithManifestDirectorySet_WritesTheManifestThere()
     {
-        using var workspace = CreateWorkspace("compile-stamp-directory");
+        using var workspace = CreateWorkspace("compile-manifest-directory");
         var task = CreateTask(workspace);
-        task.StampDirectory = "custom-stamps";
+        task.ManifestDirectory = "custom-manifests";
 
         Assert.True(task.Execute());
 
-        var stampDirectory = workspace.PathTo("custom-stamps");
-        Assert.True(File.Exists(Path.Combine(stampDirectory, "Tailwind.settings.stamp")));
-        Assert.True(File.Exists(Path.Combine(stampDirectory, "Tailwind.generated.txt")));
+        var manifestDirectory = workspace.PathTo("custom-manifests");
+        Assert.True(File.Exists(Path.Combine(manifestDirectory, "Tailwind.generated.txt")));
         Assert.False(Directory.Exists(workspace.PathTo("obj", "Scarlet.Tailwind")));
     }
 
     [Fact]
-    public void CompileTask_WithAbsoluteStampDirectory_UsesItUnchanged()
+    public void CompileTask_WithAbsoluteManifestDirectory_UsesItUnchanged()
     {
-        using var workspace = CreateWorkspace("compile-absolute-stamp-directory");
-        var stampDirectory = workspace.PathTo("absolute-stamps");
+        using var workspace = CreateWorkspace("compile-absolute-manifest-directory");
+        var manifestDirectory = workspace.PathTo("absolute-manifests");
         var task = CreateTask(workspace);
-        task.StampDirectory = stampDirectory;
+        task.ManifestDirectory = manifestDirectory;
 
         Assert.True(task.Execute());
 
-        Assert.True(File.Exists(Path.Combine(stampDirectory, "Tailwind.settings.stamp")));
-        Assert.True(File.Exists(Path.Combine(stampDirectory, "Tailwind.generated.txt")));
+        Assert.True(File.Exists(Path.Combine(manifestDirectory, "Tailwind.generated.txt")));
     }
 
     [Fact]
@@ -395,38 +392,6 @@ public class TailwindCompileTaskIntegrationTests
         Assert.Contains(
             engine.Warnings,
             warning => warning.Message?.Contains(TailwindRuntimePack.RidMetadataName, StringComparison.Ordinal) == true);
-    }
-
-    [Theory]
-    [InlineData(RuntimeSelection.VersionDownload)]
-    [InlineData(RuntimeSelection.RuntimePackItem)]
-    public void CompileTask_WithChangedRuntimeSelection_ChangesTheSettingsStamp(RuntimeSelection changed)
-    {
-        using var workspace = CreateWorkspace("compile-runtime-stamp");
-
-        Assert.True(CreateTask(workspace).Execute());
-
-        var stampPath = workspace.PathTo("obj", "Scarlet.Tailwind", "Tailwind.settings.stamp");
-        var originalStamp = File.ReadAllText(stampPath);
-        var second = CreateTask(workspace);
-
-        if (changed == RuntimeSelection.VersionDownload)
-        {
-            second.TailwindVersionDownload = "1.2.3";
-        }
-        else
-        {
-            var pack = new TaskItem("Contoso.Tailwind.Runtime.custom");
-            pack.SetMetadata(
-                TailwindRuntimePack.RidMetadataName,
-                TailwindRuntimeResolver.GetRuntimeIdentifier(TailwindRuntimeResolver.GetCurrentPlatform()));
-            pack.SetMetadata(TailwindRuntimePack.RuntimesPathMetadataName, workspace.PathTo("custom-runtimes"));
-            pack.SetMetadata(TailwindRuntimePack.PriorityMetadataName, "50");
-            second.RuntimePacks = [pack];
-        }
-
-        Assert.True(second.Execute());
-        Assert.NotEqual(originalStamp, File.ReadAllText(stampPath));
     }
 
     [Fact]
@@ -483,7 +448,6 @@ public class TailwindCompileTaskIntegrationTests
         Assert.Contains(
             engine.Errors,
             error => error.Message?.Contains("does-not-exist.css", StringComparison.Ordinal) == true);
-        Assert.False(File.Exists(workspace.PathTo("obj", "Scarlet.Tailwind", "Tailwind.settings.stamp")));
         Assert.False(File.Exists(workspace.PathTo("obj", "Scarlet.Tailwind", "Tailwind.generated.txt")));
     }
 
@@ -504,7 +468,6 @@ public class TailwindCompileTaskIntegrationTests
         Assert.Contains(
             engine.Errors,
             error => error.Message?.Contains("Command timed out after 1ms", StringComparison.Ordinal) == true);
-        Assert.False(File.Exists(workspace.PathTo("obj", "Scarlet.Tailwind", "Tailwind.settings.stamp")));
         Assert.False(File.Exists(workspace.PathTo("obj", "Scarlet.Tailwind", "Tailwind.generated.txt")));
     }
 
@@ -590,10 +553,4 @@ public class TailwindCompileTaskIntegrationTests
             Configuration = "Debug",
             RuntimeDirectory = RuntimeDirectory
         };
-
-    public enum RuntimeSelection
-    {
-        VersionDownload,
-        RuntimePackItem
-    }
 }

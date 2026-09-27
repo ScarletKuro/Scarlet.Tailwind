@@ -128,29 +128,25 @@ public class TailwindBeforeStaticWebAssetsTests
     }
 
     [Fact]
-    public async Task TailwindStampDirectoryProperty_ShouldPutTheStampAndManifestWhereItAsks()
+    public async Task TailwindManifestDirectoryProperty_ShouldPutTheManifestWhereItAsks()
     {
         using var workspace = CreateRazorClassLibrary(
             additionalProperties: """
-            <TailwindStampDirectory>custom/stamps</TailwindStampDirectory>
+            <TailwindManifestDirectory>custom/manifests</TailwindManifestDirectory>
             """);
 
         var build = await RunDotnet(workspace, $"build --configuration {DotnetCli.Configuration}");
         Assert.Equal(0, build.ExitCode);
 
-        var stamp = workspace.PathTo("custom", "stamps", "Tailwind.settings.stamp");
-        var manifest = workspace.PathTo("custom", "stamps", "Tailwind.generated.txt");
-        Assert.True(File.Exists(stamp), $"Expected a settings stamp at {stamp}.");
+        var manifest = workspace.PathTo("custom", "manifests", "Tailwind.generated.txt");
         Assert.True(File.Exists(manifest), $"Expected a generated-file manifest at {manifest}.");
 
-        var defaultStampDirectory = workspace.PathTo("obj", DotnetCli.Configuration, TargetFramework, "Scarlet.Tailwind");
-        Assert.False(File.Exists(Path.Combine(defaultStampDirectory, "Tailwind.settings.stamp")));
-        Assert.False(File.Exists(Path.Combine(defaultStampDirectory, "Tailwind.generated.txt")));
+        var defaultManifestDirectory = workspace.PathTo("obj", DotnetCli.Configuration, TargetFramework, "Scarlet.Tailwind");
+        Assert.False(File.Exists(Path.Combine(defaultManifestDirectory, "Tailwind.generated.txt")));
 
         var clean = await RunDotnet(workspace, $"clean --configuration {DotnetCli.Configuration}");
         Assert.Equal(0, clean.ExitCode);
 
-        Assert.False(File.Exists(stamp), "dotnet clean should remove the requested settings stamp.");
         Assert.False(File.Exists(manifest), "dotnet clean should remove the requested generated-file manifest.");
     }
 
@@ -303,23 +299,20 @@ public class TailwindBeforeStaticWebAssetsTests
     }
 
     [Fact]
-    public async Task Clean_RemovesTheGeneratedStampManifestAndCss()
+    public async Task Clean_RemovesTheGeneratedManifestAndCss()
     {
         using var workspace = CreateRazorClassLibrary();
 
         var build = await RunDotnet(workspace, $"build --configuration {DotnetCli.Configuration}");
         Assert.Equal(0, build.ExitCode);
 
-        var stampDirectory = workspace.PathTo("obj", DotnetCli.Configuration, TargetFramework, "Scarlet.Tailwind");
-        var stamp = Path.Combine(stampDirectory, "Tailwind.settings.stamp");
-        var manifest = Path.Combine(stampDirectory, "Tailwind.generated.txt");
-        Assert.True(File.Exists(stamp), $"Expected a settings stamp at {stamp}.");
+        var manifestDirectory = workspace.PathTo("obj", DotnetCli.Configuration, TargetFramework, "Scarlet.Tailwind");
+        var manifest = Path.Combine(manifestDirectory, "Tailwind.generated.txt");
         Assert.True(File.Exists(manifest), $"Expected a generated-file manifest at {manifest}.");
 
         var clean = await RunDotnet(workspace, $"clean --configuration {DotnetCli.Configuration}");
         Assert.Equal(0, clean.ExitCode);
 
-        Assert.False(File.Exists(stamp), "dotnet clean should remove the settings stamp.");
         Assert.False(File.Exists(manifest), "dotnet clean should remove the generated-file manifest.");
         Assert.False(
             File.Exists(workspace.PathTo("wwwroot", "css", "app.css")),

@@ -29,10 +29,10 @@
                       ReferenceOutputAssembly="false" />
   </ItemGroup>
 
-  <Target Name="_TailwindResolveStampDirectory">
+  <Target Name="_TailwindResolveManifestDirectory">
     <PropertyGroup>
-      <_TailwindStampDirectory Condition="'$(TailwindStampDirectory)' != ''">$(TailwindStampDirectory)</_TailwindStampDirectory>
-      <_TailwindStampDirectory Condition="'$(_TailwindStampDirectory)' == '' AND '$(IntermediateOutputPath)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'Scarlet.Tailwind'))))</_TailwindStampDirectory>
+      <_TailwindManifestDirectory Condition="'$(TailwindManifestDirectory)' != ''">$(TailwindManifestDirectory)</_TailwindManifestDirectory>
+      <_TailwindManifestDirectory Condition="'$(_TailwindManifestDirectory)' == '' AND '$(IntermediateOutputPath)' != ''">$([System.IO.Path]::GetFullPath($([System.IO.Path]::Combine('$(MSBuildProjectDirectory)', '$(IntermediateOutputPath)', 'Scarlet.Tailwind'))))</_TailwindManifestDirectory>
     </PropertyGroup>
   </Target>
 
@@ -41,7 +41,7 @@
        package. -->
   <Target Name="RunTailwindBeforeStaticWebAssets"
           BeforeTargets="DispatchToInnerBuilds;ResolveProjectStaticWebAssets;PreBuildEvent"
-          DependsOnTargets="ResolveProjectReferences;_TailwindResolveStampDirectory"
+          DependsOnTargets="ResolveProjectReferences;_TailwindResolveManifestDirectory"
           Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND '$(DesignTimeBuild)' != 'true' AND '$(NoBuild)' != 'true' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
     <TailwindCompileTask Compilations="@(TailwindBeforeStaticWebAssets)"
                          ProjectDirectory="$(MSBuildProjectDirectory)"
@@ -52,7 +52,7 @@
                          Silent="$(TailwindSilent)"
                          Cwd="$(TailwindCwd)"
                          AdditionalArguments="$(TailwindAdditionalArguments)"
-                         StampDirectory="$(_TailwindStampDirectory)"
+                         ManifestDirectory="$(_TailwindManifestDirectory)"
                          RuntimeDirectory="$(TailwindRuntimeDirectory)"
                          TailwindRuntimeDownload="$(TailwindRuntimeDownload)"
                          TailwindVersionDownload="$(TailwindVersionDownload)"
@@ -82,13 +82,13 @@
        nothing, so running twice is harmless. -->
   <Target Name="TailwindClean"
           BeforeTargets="CoreClean;Clean"
-          DependsOnTargets="_TailwindResolveStampDirectory">
-    <ReadLinesFromFile File="$(_TailwindStampDirectory)/Tailwind.generated.txt"
-                       Condition="'$(_TailwindStampDirectory)' != '' AND Exists('$(_TailwindStampDirectory)/Tailwind.generated.txt')">
+          DependsOnTargets="_TailwindResolveManifestDirectory">
+    <ReadLinesFromFile File="$(_TailwindManifestDirectory)/Tailwind.generated.txt"
+                       Condition="'$(_TailwindManifestDirectory)' != '' AND Exists('$(_TailwindManifestDirectory)/Tailwind.generated.txt')">
       <Output TaskParameter="Lines" ItemName="_TailwindFilesToClean" />
     </ReadLinesFromFile>
     <Delete Files="@(_TailwindFilesToClean)" Condition="'@(_TailwindFilesToClean)' != ''" />
-    <Delete Files="$(_TailwindStampDirectory)/Tailwind.generated.txt;$(_TailwindStampDirectory)/Tailwind.settings.stamp"
-            Condition="'$(_TailwindStampDirectory)' != ''" />
+    <Delete Files="$(_TailwindManifestDirectory)/Tailwind.generated.txt"
+            Condition="'$(_TailwindManifestDirectory)' != ''" />
   </Target>
 </Project>
