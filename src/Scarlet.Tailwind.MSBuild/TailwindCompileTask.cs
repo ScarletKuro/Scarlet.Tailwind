@@ -659,8 +659,6 @@ public sealed class TailwindCompileTask : Task
         public static TailwindMapMode Inlined() => new(true, null);
 
         public static TailwindMapMode External(string path) => new(false, path);
-
-        public override string ToString() => Path ?? (Inline ? "inline" : "none");
     }
 
     private sealed class TailwindSettings
@@ -687,18 +685,6 @@ public sealed class TailwindCompileTask : Task
         public bool Silent { get; }
         public string? Cwd { get; }
         public string AdditionalArguments { get; }
-
-        public override string ToString()
-        {
-            return string.Join(
-                "|",
-                Minify.ToString(),
-                Optimize.ToString(),
-                Map.ToString(),
-                Silent.ToString(),
-                Cwd ?? string.Empty,
-                AdditionalArguments);
-        }
     }
 
     private sealed class TailwindEntry
