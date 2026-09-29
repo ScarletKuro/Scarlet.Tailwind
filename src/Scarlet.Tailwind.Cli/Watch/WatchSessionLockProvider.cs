@@ -38,8 +38,9 @@ internal sealed class WatchSessionLockProvider : IWatchSessionLockProvider
                 FileStream stream;
                 try
                 {
-                    // Readers may inspect the owner metadata, but no second writer can acquire this output.
-                    stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.Read);
+                    // FileShare.Read maps to a shared flock on Unix, so it does not exclude another watcher.
+                    // The lock must be exclusive on every platform; metadata remains readable after release.
+                    stream = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                 }
                 catch (IOException)
                 {

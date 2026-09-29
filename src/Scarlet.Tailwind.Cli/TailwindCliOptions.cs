@@ -25,7 +25,7 @@ internal sealed class TailwindCliOptions
     /// <summary>Name of the variable that suppresses use of the embedded binary.</summary>
     public const string NoEmbeddedVariable = "SCARLET_TAILWIND_NO_EMBEDDED";
 
-    /// <summary>Name of the variable that disables Scarlet's reserved diagnostic flag and command names.</summary>
+    /// <summary>Name of the variable that disables the reserved diagnostic flag and command names.</summary>
     public const string PassthroughVariable = "SCARLET_TAILWIND_PASSTHROUGH";
 
     /// <summary>Name of the variable that reports the resolved Tailwind on stderr before running it.</summary>
@@ -89,7 +89,7 @@ internal sealed class TailwindCliOptions
     /// <summary>Whether the binary embedded in the package should be ignored.</summary>
     public bool IgnoreEmbedded { get; }
 
-    /// <summary>Whether all reserved Scarlet tokens are disabled, making argument forwarding absolute.</summary>
+    /// <summary>Whether all reserved tokens are disabled, making argument forwarding absolute.</summary>
     public bool PurePassthrough { get; }
 
     /// <summary>Whether to report the resolved Tailwind on stderr before running it.</summary>
