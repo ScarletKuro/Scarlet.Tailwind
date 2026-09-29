@@ -91,6 +91,51 @@ public class WatchSessionLockProviderTests
         }
     }
 
+    [Fact]
+    public void TryAcquire_WhenPathNormalizationFails_ShouldWrapTheFailureAndLeaveNoLease()
+    {
+        var cacheRoot = Path.Combine(Path.GetTempPath(), "scarlet-tailwind-lock-tests", Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var provider = new WatchSessionLockProvider(cacheRoot);
+            var invocation = CreateInvocation("app.css") with
+            {
+                WorkingDirectory = "relative",
+                GeneratedPaths = ["app.css"]
+            };
+            using var staleLease = new MemoryStream();
+            IDisposable? lease = staleLease;
+
+            var exception = Assert.Throws<TailwindWatchException>(
+                () => provider.TryAcquire([invocation], out lease));
+
+            Assert.Contains("could not create watch-session locks", exception.Message);
+            Assert.Null(lease);
+        }
+        finally
+        {
+            if (Directory.Exists(cacheRoot))
+            {
+                Directory.Delete(cacheRoot, recursive: true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void NormalizePath_ShouldApplyTheRequestedPlatformCasing(bool isWindows)
+    {
+        var workingDirectory = Path.Combine(Path.GetTempPath(), "MixedCaseProject");
+        var relativePath = Path.Combine("Styles", "App.css");
+        var fullPath = Path.GetFullPath(relativePath, workingDirectory);
+
+        var normalized = WatchSessionLockProvider.NormalizePath(relativePath, workingDirectory, isWindows);
+
+        Assert.Equal(isWindows ? fullPath.ToUpperInvariant() : fullPath, normalized);
+    }
+
     private static TailwindWatchInvocation CreateInvocation(string outputName)
     {
         var projectDirectory = Path.Combine(Path.GetTempPath(), "app");

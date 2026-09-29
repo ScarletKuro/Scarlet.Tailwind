@@ -25,7 +25,8 @@ internal sealed class WatchSessionLockProvider : IWatchSessionLockProvider
             Directory.CreateDirectory(lockDirectory);
 
             var outputs = invocations
-                .SelectMany(static invocation => invocation.GeneratedPaths.Select(path => NormalizePath(path, invocation.WorkingDirectory)))
+                .SelectMany(static invocation => invocation.GeneratedPaths.Select(
+                    path => NormalizePath(path, invocation.WorkingDirectory, OperatingSystem.IsWindows())))
                 .Distinct(StringComparer.Ordinal)
                 .OrderBy(static path => path, StringComparer.Ordinal);
 
@@ -72,11 +73,11 @@ internal sealed class WatchSessionLockProvider : IWatchSessionLockProvider
         }
     }
 
-    private static string NormalizePath(string path, string workingDirectory)
+    internal static string NormalizePath(string path, string workingDirectory, bool isWindows)
     {
         var fullPath = Path.GetFullPath(path, workingDirectory);
 
-        return OperatingSystem.IsWindows()
+        return isWindows
             ? fullPath.ToUpperInvariant()
             : fullPath;
     }
