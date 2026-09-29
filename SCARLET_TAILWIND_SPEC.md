@@ -452,7 +452,7 @@ Tailwind supports first-class. Every flag in *Upstream Facts* therefore has a ho
 The two exclusions are the only ones, and they share a reason rather than being a judgement call:
 Tailwind's watch mode never exits, so a build that invoked it would hang instead of completing, and
 `--poll` is valid only alongside `--watch`. Neither may reach Tailwind through `AdditionalArguments`.
-Watching is `dotnet watch`'s job — see *Competitor Analysis*.
+Watching is the separately managed CLI's job — see *Competitor Analysis*.
 
 If Tailwind adds a flag, the corresponding property is a one-line addition plus its wiring test, and the
 table above is the checklist that makes the omission obvious.
@@ -780,10 +780,10 @@ Arguments are forwarded verbatim using `ArgumentList`, never a concatenated stri
 inherited rather than redirected, so `isatty` holds and colours and piping behave exactly as a direct
 invocation. Tailwind's exit code is returned unchanged.
 
-`--scarlet-info` is the single reserved token, honoured only as the first argument, with
+`--scarlet-info` and the project-aware `watch` command are reserved only as the first token, with
 `SCARLET_TAILWIND_PASSTHROUGH=1` as a permanent opt-out — so `dotnet tailwind --watch --scarlet-info` still
-reaches Tailwind. It must resolve with downloads disabled: asking the tool what it would do must never
-itself fetch 110 MB.
+reaches Tailwind. Diagnostics must resolve with downloads disabled: asking the tool what it would do must
+never itself fetch 110 MB.
 
 | Variable | Meaning |
 | --- | --- |
@@ -1038,20 +1038,15 @@ Three gaps are common to all of them, and each is something the sibling platform
 
 A fourth gap is narrower but decisive for the incumbent's users: **watching should not be a hosted
 service.** `Scarlet.Tailwind` should have no runtime package, no `IHostingStartup`, and no long-lived child
-process owned by the application. The supported dev loop is a `Watch` item plus `dotnet watch`, exactly as
-documented for both siblings:
-
-```xml
-<ItemGroup>
-  <Watch Include="Styles\**\*.css" />
-</ItemGroup>
-```
-
-`dotnet watch` then triggers an ordinary build, which runs the Tailwind target that was always going to
-run. Nothing owns a background process, so nothing can leak one. The honest cost is a full MSBuild build
-per save rather than Tailwind's own incremental watch; for anyone who needs that, running
-`dotnet tailwind --watch` as a separate foreground process is the documented escape hatch, and there the
-process is the user's to manage rather than something a web host spawned invisibly.
+process owned by the application. Blazor Hot Reload applies Razor deltas without running arbitrary MSBuild
+targets, and a `Watch` item only adds a file to the watch set; it does not force the Tailwind target to run.
+The supported Hot Reload loop is therefore two explicit foreground processes: `dotnet watch` owns the app
+and browser refresh, while `dotnet tailwind watch` queries the MSBuild project for its evaluated entry
+points and settings, then owns the native Tailwind watchers that regenerate CSS. The raw
+`dotnet tailwind --input ... --output ... --watch` form remains available without an MSBuild project.
+Nothing owns a hidden child process, so nothing can leak one. An MSBuild-only alternative remains available
+with explicit `Watch` items and `dotnet watch --no-hot-reload`, at the honest cost of a full rebuild and
+application restart per save.
 
 ## Documentation Requirements
 
@@ -1068,8 +1063,9 @@ process is the user's to manage rather than something a web host spawned invisib
 
 The `dotnet watch` section must explain that `--watch`, `-w`, and `--poll` are rejected in
 `TailwindAdditionalArguments`. Tailwind's watch mode never exits, so the build would hang rather than
-finish. The supported approach is a `Watch` item pointing at the sources, or a separately managed
-`dotnet tailwind --watch` process.
+finish. The supported Hot Reload approach is a separately managed `dotnet tailwind watch` process beside
+`dotnet watch`; the command resolves its configuration from `Scarlet.Tailwind.MSBuild`. `Watch` items are
+only sufficient when Hot Reload is disabled so each change causes a full build and restart.
 
 ### Writing Your Entry Stylesheet
 

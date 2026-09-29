@@ -53,6 +53,17 @@ internal static class Program
             Console.Out,
             Console.Error);
 
-        return application.Run(args);
+        var log = new ConsoleTailwindLogger(Console.Error);
+        var dispatcher = new TailwindCommandDispatcher(
+            application,
+            new TailwindWatchCommand(
+                new MsBuildWatchConfigurationProvider(),
+                new WatchProcessLauncher(log),
+                Console.Out,
+                Console.Error,
+                Directory.GetCurrentDirectory),
+            options.PurePassthrough);
+
+        return dispatcher.Run(args);
     }
 }

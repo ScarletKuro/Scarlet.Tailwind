@@ -58,9 +58,11 @@
                          TailwindVersionDownload="$(TailwindVersionDownload)"
                          DownloadMutexTimeoutSeconds="$(TailwindDownloadMutexTimeoutSeconds)"
                          TimeoutMilliseconds="$(TailwindTimeoutMilliseconds)"
+                         ConfigurationOnly="false"
                          RuntimePacks="@(TailwindRuntimePack)">
       <Output TaskParameter="GeneratedFiles" ItemName="_TailwindGeneratedFiles" />
       <Output TaskParameter="RemovedFiles" ItemName="_TailwindRemovedFiles" />
+      <Output TaskParameter="WatchInvocations" ItemName="_TailwindWatchInvocations" />
     </TailwindCompileTask>
 
     <ItemGroup>
@@ -71,6 +73,35 @@
       <Content Include="@(_TailwindNewContent)" CopyToPublishDirectory="PreserveNewest" />
       <FileWrites Include="@(_TailwindGeneratedFiles)" />
     </ItemGroup>
+  </Target>
+
+  <!-- Explicitly queried by `dotnet tailwind watch`. It resolves the exact executable and arguments used
+       by the build, but never compiles or starts a long-running process inside MSBuild. -->
+  <Target Name="ResolveTailwindWatchConfiguration"
+          DependsOnTargets="ResolveProjectReferences"
+          Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')"
+          Returns="@(_TailwindWatchInvocations)">
+    <TailwindCompileTask Compilations="@(TailwindBeforeStaticWebAssets)"
+                         ProjectDirectory="$(MSBuildProjectDirectory)"
+                         Configuration="$(Configuration)"
+                         Minify="$(TailwindMinify)"
+                         Optimize="$(TailwindOptimize)"
+                         Map="$(TailwindMap)"
+                         Silent="$(TailwindSilent)"
+                         Cwd="$(TailwindCwd)"
+                         AdditionalArguments="$(TailwindAdditionalArguments)"
+                         ManifestDirectory="$(TailwindManifestDirectory)"
+                         RuntimeDirectory="$(TailwindRuntimeDirectory)"
+                         TailwindRuntimeDownload="$(TailwindRuntimeDownload)"
+                         TailwindVersionDownload="$(TailwindVersionDownload)"
+                         DownloadMutexTimeoutSeconds="$(TailwindDownloadMutexTimeoutSeconds)"
+                         TimeoutMilliseconds="$(TailwindTimeoutMilliseconds)"
+                         ConfigurationOnly="true"
+                         RuntimePacks="@(TailwindRuntimePack)">
+      <Output TaskParameter="GeneratedFiles" ItemName="_TailwindWatchGeneratedFiles" />
+      <Output TaskParameter="RemovedFiles" ItemName="_TailwindWatchRemovedFiles" />
+      <Output TaskParameter="WatchInvocations" ItemName="_TailwindWatchInvocations" />
+    </TailwindCompileTask>
   </Target>
 
   <!-- Hooked to both targets deliberately. In a single-target-framework project CoreClean runs with

@@ -49,11 +49,24 @@ public sealed class TailwindCompileTask : Task
     /// </summary>
     public int TimeoutMilliseconds { get; set; }
 
+    /// <summary>
+    /// Resolves the executable and normalized invocation arguments without compiling. Used by the project-aware
+    /// CLI watcher; normal builds leave this disabled.
+    /// </summary>
+    public bool ConfigurationOnly { get; set; }
+
     [Output]
     public ITaskItem[] GeneratedFiles { get; private set; } = Array.Empty<ITaskItem>();
 
     [Output]
     public ITaskItem[] RemovedFiles { get; private set; } = Array.Empty<ITaskItem>();
+
+    /// <summary>
+    /// Fully resolved Tailwind invocations for a long-running watcher. Arguments are base64 encoded individually
+    /// in the <c>ArgumentsBase64</c> metadata so MSBuild can return them without losing quoting or empty tokens.
+    /// </summary>
+    [Output]
+    public ITaskItem[] WatchInvocations { get; private set; } = Array.Empty<ITaskItem>();
 
     public override bool Execute()
     {
@@ -87,6 +100,16 @@ public sealed class TailwindCompileTask : Task
             }
 
             var tailwindPath = ResolveTailwind(fileSystem);
+
+            if (ConfigurationOnly)
+            {
+                WatchInvocations = entries
+                    .Select(entry => CreateWatchInvocation(tailwindPath, entry))
+                    .ToArray();
+
+                return !Log.HasLoggedErrors;
+            }
+
             var manifestDirectory = ResolveManifestDirectory();
             var manifestPath = Path.Combine(manifestDirectory, "Tailwind.generated.txt");
             var expectedFiles = entries.SelectMany(static entry => entry.ExpectedOutputs).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
@@ -145,6 +168,21 @@ public sealed class TailwindCompileTask : Task
         {
             gate.Close();
         }
+    }
+
+    private ITaskItem CreateWatchInvocation(string tailwindPath, TailwindEntry entry)
+    {
+        var item = new TaskItem(entry.InputPath);
+        var encodedArguments = BuildArguments(entry)
+            .Select(static argument => Convert.ToBase64String(Encoding.UTF8.GetBytes(argument)));
+
+        item.SetMetadata("ProtocolVersion", "1");
+        item.SetMetadata("ExecutablePath", tailwindPath);
+        item.SetMetadata("InputPath", entry.InputPath);
+        item.SetMetadata("OutputPath", entry.OutputPath);
+        item.SetMetadata("ArgumentsBase64", string.Join(";", encodedArguments));
+
+        return item;
     }
 
     private TailwindSettings ResolveSettings(

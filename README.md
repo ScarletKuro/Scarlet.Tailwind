@@ -18,7 +18,8 @@ Node.js, npm, or `node_modules` required.
 | **During a build** | [![NuGet](https://img.shields.io/nuget/v/Scarlet.Tailwind.MSBuild?color=ff4081&label=Scarlet.Tailwind.MSBuild&logo=nuget&style=flat-square)](https://www.nuget.org/packages/Scarlet.Tailwind.MSBuild/) | You want `dotnet build` to compile Tailwind into static web assets — Blazor, Razor Class Libraries, ASP.NET Core |
 | **On the command line** | [![NuGet](https://img.shields.io/nuget/v/Scarlet.Tailwind.Cli?color=ff4081&label=Scarlet.Tailwind.Cli&logo=nuget&style=flat-square)](https://www.nuget.org/packages/Scarlet.Tailwind.Cli/) | You want `dotnet tailwind ...`, including `--watch`, pinned per repository |
 
-They are independent — use either, or both.
+Raw CLI invocations and build integration work independently. When both packages are installed,
+`dotnet tailwind watch` intentionally bridges them by reading the project's evaluated MSBuild configuration.
 
 ### Scarlet.Tailwind.MSBuild — Tailwind during `dotnet build`
 
@@ -47,7 +48,7 @@ cleaning, and `dotnet watch` integration.
 ```bash
 dotnet new tool-manifest
 dotnet tool install Scarlet.Tailwind.Cli
-dotnet tailwind --input Styles/app.css --output wwwroot/css/app.css --watch
+dotnet tailwind watch
 ```
 
 The tool version is the Tailwind version, so `.config/dotnet-tools.json` pins Tailwind alongside the rest
@@ -55,8 +56,8 @@ of your tooling. `Scarlet.Tailwind.Cli` is a pointer package; installing it also
 `Scarlet.Tailwind.Cli.*` sub-package for your platform, and that one embeds Tailwind, so it needs no network
 at run time.
 
-📖 **[Full documentation →](src/Scarlet.Tailwind.Cli/README.md)** — installing, argument forwarding,
-runtime resolution, diagnostics, environment variables, and watch mode.
+📖 **[Full documentation →](src/Scarlet.Tailwind.Cli/README.md)** — installing, project-aware watch mode,
+argument forwarding, runtime resolution, diagnostics, and environment variables.
 
 ## Available Packages
 
@@ -125,12 +126,13 @@ All tests:
 dotnet test
 ```
 
-End-to-end scenarios pack real packages into a local feed and consume them from a temporary project. They
-take a workspace path, an MSBuild package version, and a Tailwind version:
+End-to-end scenarios pack real packages into a local feed and consume them from a temporary project. The
+CLI scenarios additionally take the independently revisioned CLI package version:
 
 ```bash
 tests/e2e/package-installation/verify.sh "$PWD" 1.0.0-local 4.3.3
-tests/e2e/cli-tool/verify.sh            "$PWD" 1.0.0-local 4.3.3
+tests/e2e/cli-tool/verify.sh            "$PWD" 1.0.0-local 4.3.3 4.3.3.1
+tests/e2e/hot-reload/verify.sh          "$PWD" 1.0.0-local 4.3.3 4.3.3.1
 ```
 
 ### Creating a Package

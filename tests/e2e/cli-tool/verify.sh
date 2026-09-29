@@ -7,16 +7,17 @@ set -euo pipefail
 # `dotnet tailwind ...` runs without downloading anything. This proves it by compiling a real stylesheet,
 # checking that no download cache was created, and asking --scarlet-info what it resolved.
 #
-# Usage: ./verify.sh <workspace-path> <package-version> <runtime-version>
+# Usage: ./verify.sh <workspace-path> <package-version> <tailwind-version> <cli-version>
 
-if [ $# -ne 3 ]; then
-    echo "Usage: $0 <workspace-path> <package-version> <runtime-version>"
+if [ $# -ne 4 ]; then
+    echo "Usage: $0 <workspace-path> <package-version> <tailwind-version> <cli-version>"
     exit 1
 fi
 
 WORKSPACE_PATH="$1"
 PACKAGE_VERSION="$2"
-RUNTIME_VERSION="$3"
+TAILWIND_VERSION="$3"
+CLI_VERSION="$4"
 
 FAILED=0
 
@@ -43,7 +44,7 @@ process_template() {
 
     sed -e "s|{{WORKSPACE_PATH}}|$workspace_escaped|g" \
         -e "s|{{PACKAGE_VERSION}}|$PACKAGE_VERSION|g" \
-        -e "s|{{RUNTIME_VERSION}}|$RUNTIME_VERSION|g" \
+        -e "s|{{RUNTIME_VERSION}}|$TAILWIND_VERSION|g" \
         "$template_file" > "$output_file"
 }
 
@@ -58,7 +59,8 @@ export SCARLET_TAILWIND_CACHE="$TEST_DIR/tailwind-cache"
 
 section "E2E Test: Scarlet.Tailwind.Cli"
 echo "Workspace: $WORKSPACE_PATH"
-echo "Runtime version: $RUNTIME_VERSION"
+echo "Tailwind version: $TAILWIND_VERSION"
+echo "CLI package version: $CLI_VERSION"
 echo "✓ Created test directory: $TEST_DIR"
 
 process_template "$TEMPLATES_DIR/nuget.config.template" "nuget.config"
@@ -67,10 +69,10 @@ echo "✓ Created nuget.config with local package source"
 # A local manifest uses the SDK's global tool-resolver cache, whose entry keeps the absolute path into this
 # temporary NuGet cache after cleanup. An isolated tool path makes repeated runs use this run's package.
 TOOL_PATH="$TEST_DIR/tools"
-dotnet tool install Scarlet.Tailwind.Cli --tool-path "$TOOL_PATH" --version "$RUNTIME_VERSION" --configfile nuget.config > /dev/null \
+dotnet tool install Scarlet.Tailwind.Cli --tool-path "$TOOL_PATH" --version "$CLI_VERSION" --configfile nuget.config > /dev/null \
     || fatal "Tool install failed"
 export PATH="$TOOL_PATH:$PATH"
-echo "✓ Installed Scarlet.Tailwind.Cli $RUNTIME_VERSION from the local feed into an isolated tool path"
+echo "✓ Installed Scarlet.Tailwind.Cli $CLI_VERSION from the local feed into an isolated tool path"
 
 section "Diagnostics"
 INFO="$(dotnet tailwind --scarlet-info 2>&1)" || fatal "--scarlet-info failed"
@@ -84,10 +86,10 @@ else
     FAILED=1
 fi
 
-if echo "$INFO" | grep -q "$RUNTIME_VERSION"; then
+if echo "$INFO" | grep -q "$TAILWIND_VERSION"; then
     echo "✓ Diagnostics report the expected Tailwind version"
 else
-    echo "✗ Diagnostics do not mention version $RUNTIME_VERSION"
+    echo "✗ Diagnostics do not mention Tailwind version $TAILWIND_VERSION"
     FAILED=1
 fi
 

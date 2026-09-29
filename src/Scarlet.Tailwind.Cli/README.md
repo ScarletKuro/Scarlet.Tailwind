@@ -6,11 +6,14 @@ Run the [Tailwind CSS](https://tailwindcss.com) standalone CLI as a .NET tool. N
 ```bash
 dotnet tailwind --input Styles/app.css --output wwwroot/css/app.css
 dotnet tailwind --input Styles/app.css --output wwwroot/css/app.css --watch
+dotnet tailwind watch
 dotnet tailwind --help
 ```
 
 Every argument is forwarded to Tailwind verbatim, so anything valid after `tailwindcss` is valid after
-`dotnet tailwind`.
+`dotnet tailwind`. The one command name reserved by Scarlet is `watch` in first position; it reads the
+entry points already configured by `Scarlet.Tailwind.MSBuild`. Set `SCARLET_TAILWIND_PASSTHROUGH=1` if an
+upstream Tailwind command with that name ever needs to be forwarded instead.
 
 ## Why not just download the standalone CLI?
 
@@ -95,9 +98,9 @@ dotnet tailwind --scarlet-info
 dotnet tailwind --scarlet-info --json
 ```
 
-That is the only argument the tool reserves for itself, it is recognised only as the *first* argument, and
-`SCARLET_TAILWIND_PASSTHROUGH=1` disables even that. It never downloads anything — it reports the URL it
-*would* use.
+The diagnostic flag is recognised only as the *first* argument. Together with the first-position `watch`
+command, it is part of Scarlet's deliberately small reserved surface. `SCARLET_TAILWIND_PASSTHROUGH=1`
+disables both reservations. Diagnostics never downloads anything — it reports the URL it *would* use.
 
 ## Configuration
 
@@ -108,7 +111,7 @@ That is the only argument the tool reserves for itself, it is recognised only as
 | `SCARLET_TAILWIND_CACHE` | Override the download cache root. |
 | `SCARLET_TAILWIND_NO_EMBEDDED` | Ignore the embedded binary. |
 | `SCARLET_TAILWIND_DIAGNOSTICS` | Print the resolved Tailwind path to stderr before running. |
-| `SCARLET_TAILWIND_PASSTHROUGH` | Disable `--scarlet-info` so every argument reaches Tailwind. |
+| `SCARLET_TAILWIND_PASSTHROUGH` | Disable `--scarlet-info` and `watch` command so every argument reaches Tailwind. |
 | `SCARLET_TAILWIND_DOWNLOAD_TIMEOUT` | Seconds to wait for a concurrent download. Defaults to 300. |
 
 Configuration is environment variables rather than command-line flags on purpose: every argument belongs
@@ -130,11 +133,45 @@ and marker are replaced.
 If you want Tailwind to run as part of `dotnet build`, before ASP.NET Core, Blazor and Razor Class Library
 static web assets are discovered, use
 [`Scarlet.Tailwind.MSBuild`](https://www.nuget.org/packages/Scarlet.Tailwind.MSBuild/) instead. The two are
-independent; this tool is for the command line.
+independent for raw CLI invocations; the project-aware watch command below integrates them when both are
+installed.
+
+## Project-aware watch mode
 
 `--watch` is the one thing this tool does that the MSBuild task deliberately will not: a watch never exits,
 so a build that started one would hang instead of finishing. Run it here, in its own terminal, alongside
-`dotnet watch`.
+`dotnet watch`. This is also the supported Blazor Hot Reload loop: Razor changes are applied to the running
+app while this process regenerates the stylesheet, which `dotnet watch` then treats as a changed static
+asset.
+
+When the current project references `Scarlet.Tailwind.MSBuild`, the project-aware form reuses its evaluated
+entry points, paths, runtime and Debug/Release defaults:
+
+```bash
+dotnet tailwind watch
+dotnet tailwind watch --project src/MyApp/MyApp.csproj
+dotnet tailwind watch --configuration Release
+```
+
+These two forms solve different problems:
+
+| Command | Configuration comes from | Use it when |
+|---|---|---|
+| `dotnet tailwind --input Styles/app.css --output wwwroot/css/app.css --watch` | The arguments on this command line | You want raw Tailwind passthrough, have no MSBuild project, or need an ad hoc watcher |
+| `dotnet tailwind watch` | Evaluated `Scarlet.Tailwind.MSBuild` items and properties in the project | The build already defines the entry points and the watch loop must use exactly the same configuration |
+
+The raw form runs the Tailwind binary embedded in the CLI package and forwards the arguments as written.
+The project-aware form asks MSBuild for every normalized invocation, including the runtime selected by the
+project, and adds Tailwind's watch flag itself. It also supports multiple configured entry points without
+duplicating any input or output paths on the command line.
+
+The command stays in the foreground and owns every native Tailwind process it starts. Closing the terminal
+or pressing Ctrl+C ends the whole watch session. For example, the equivalent raw form for a single entry
+point remains available when no MSBuild project is involved:
+
+```bash
+dotnet tailwind --input Styles/app.css --output wwwroot/css/app.css --watch
+```
 
 ## Links
 

@@ -400,6 +400,7 @@ directly only if you need a compile outside that target.
 | `TailwindVersionDownload` | No | Version to download. Empty resolves the latest GitHub release | empty |
 | `DownloadMutexTimeoutSeconds` | No | Seconds to wait when another process holds the download mutex | `300` |
 | `TimeoutMilliseconds` | No | Maximum time per Tailwind invocation before it is killed. `0` waits indefinitely | `0` |
+| `ConfigurationOnly` | No | Resolve normalized watcher invocations without compiling. Used internally by `dotnet tailwind watch` | `false` |
 
 ### Output Parameters
 
@@ -407,6 +408,7 @@ directly only if you need a compile outside that target.
 | --- | --- |
 | `GeneratedFiles` | Every generated CSS and external source-map file. Each carries `RelativePath` metadata used to add it to `@(Content)` and `@(FileWrites)` |
 | `RemovedFiles` | Previously generated files that are no longer produced, removed from `@(Content)` and `@(None)` so stale assets are not served |
+| `WatchInvocations` | Resolved executable and encoded argument vectors returned by `ResolveTailwindWatchConfiguration` |
 
 `RemovedFiles` is what stops a stale `app.css.map` being served after you turn maps off: the targets drop it
 from `@(Content)` and the task deletes it.
@@ -425,23 +427,52 @@ including outputs whose names came from properties.
 
 ## dotnet watch Integration
 
-Add a `Watch` item so `dotnet watch` re-runs the build when your sources change:
+Blazor Hot Reload applies `.razor` changes directly to the running process; it does **not** run arbitrary
+MSBuild targets. A `Watch` item makes `dotnet watch` notice a file, but it does not force
+`RunTailwindBeforeStaticWebAssets` to run. For true Hot Reload, run the CLI watcher beside the app watcher:
+
+```bash
+# Terminal 1: Razor/C# Hot Reload and browser refresh
+dotnet watch
+
+# Terminal 2: reuse this project's evaluated MSBuild entry points and settings
+dotnet tailwind watch
+```
+
+Install [`Scarlet.Tailwind.Cli`](https://www.nuget.org/packages/Scarlet.Tailwind.Cli/) as a local tool so
+the second command is pinned with the repository. `dotnet tailwind watch` asks MSBuild to resolve the same
+runtime, input, output, working directory, maps and arguments used by the normal build; it does not start a
+watcher from an MSBuild target. Tailwind watches everything it scans, including Razor
+files. When it rewrites `wwwroot/css/app.css`, `dotnet watch` handles the stylesheet as a static asset and
+refreshes the browser while the Blazor process stays alive.
+
+This is different from raw CLI passthrough:
+
+```bash
+dotnet tailwind --input Styles/app.css --output wwwroot/css/app.css --watch
+```
+
+The raw form uses only the arguments written on that command line. The project-aware `dotnet tailwind watch`
+form evaluates this package's items and properties, so paths, source maps, minification, additional arguments,
+runtime selection and multiple entry points stay identical to the build without being repeated.
+
+If you want an MSBuild-only loop, disable Hot Reload and explicitly watch every source Tailwind scans:
 
 ```xml
 <ItemGroup>
-  <Watch Include="Styles\**\*.css" />
-  <Watch Include="**\*.razor" />
-  <Watch Include="**\*.cshtml" />
+  <Watch Include="Styles\**\*.css;**\*.razor;**\*.razor.cs;**\*.cshtml;**\*.html;wwwroot\**\*.js" />
 </ItemGroup>
 ```
 
-Watch the files Tailwind *scans*, not just the stylesheet. Adding a class to a `.razor` file has to trigger a
-rebuild, or the new class never reaches your CSS.
+```bash
+dotnet watch --no-hot-reload
+```
 
-> Tailwind watch flags are rejected by the MSBuild task because watch mode does not exit. If you want a
-> true watcher, run
-> [`dotnet tailwind --watch`](https://www.nuget.org/packages/Scarlet.Tailwind.Cli/) as a separate process, or
-> let `dotnet watch` drive the build as above.
+That restarts the application and performs an ordinary build on each change, so Tailwind runs through the
+MSBuild task. It validates the same output, but it is not Hot Reload.
+
+> Tailwind watch flags are rejected by the MSBuild task because watch mode does not exit. Run them only
+> through the CLI as a separate foreground process.
 
 ## Supported Platforms
 

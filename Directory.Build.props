@@ -11,6 +11,6 @@
          0 whenever TailwindVersion changes. It lives here, next to TailwindVersion, because the alternative
          is discovering at release time that the deploy silently dropped your fix - the push skips
          duplicates, so a rebuilt package at an unchanged version never reaches the feed. -->
-    <TailwindCliRevision>0</TailwindCliRevision>
+    <TailwindCliRevision>1</TailwindCliRevision>
   </PropertyGroup>
 </Project>

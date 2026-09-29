@@ -101,6 +101,12 @@ jobs:
         run: |
           VERSION="0.0.1-ci.${{ github.run_number }}"
           TAILWIND_VERSION=$(sed -n 's/.*<TailwindVersion>\([^<]*\)<\/TailwindVersion>.*/\1/p' Directory.Build.props)
+          TAILWIND_CLI_REVISION=$(sed -n 's/.*<TailwindCliRevision>\([^<]*\)<\/TailwindCliRevision>.*/\1/p' Directory.Build.props)
+          if [ "$TAILWIND_CLI_REVISION" = "0" ]; then
+            CLI_VERSION="$TAILWIND_VERSION"
+          else
+            CLI_VERSION="$TAILWIND_VERSION.$TAILWIND_CLI_REVISION"
+          fi
 
           # Needed by the package-installation E2E test below, which references it by name/version.
           dotnet pack src/Scarlet.Tailwind.MSBuild/Scarlet.Tailwind.MSBuild.csproj \
@@ -122,6 +128,7 @@ jobs:
 
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAILWIND_VERSION=$TAILWIND_VERSION" >> $GITHUB_ENV
+          echo "CLI_VERSION=$CLI_VERSION" >> $GITHUB_ENV
 
       # Proves Scarlet.Tailwind.MSBuild itself resolves and runs a musl Tailwind via the TailwindRuntimePack contract,
       # not just that the CLI tool does.
@@ -142,7 +149,7 @@ jobs:
         shell: bash
         run: |
           chmod +x tests/e2e/cli-tool/verify.sh
-          tests/e2e/cli-tool/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+          tests/e2e/cli-tool/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}" "${{ env.CLI_VERSION }}"
 
   deploy:
     name: Build and Deploy to NuGet
@@ -351,7 +358,7 @@ jobs:
         if: steps.release_target.outputs.pack_cli == 'true'
         run: |
           chmod +x tests/e2e/cli-tool/verify.sh
-          tests/e2e/cli-tool/verify.sh "${{ github.workspace }}" "${{ steps.get_version.outputs.version }}" "${{ steps.get_tailwind_version.outputs.tailwind_version }}"
+          tests/e2e/cli-tool/verify.sh "${{ github.workspace }}" "${{ steps.get_version.outputs.version }}" "${{ steps.get_tailwind_version.outputs.tailwind_version }}" "${{ steps.get_tailwind_version.outputs.cli_version }}"
 
       - name: NuGet login
         id: login
