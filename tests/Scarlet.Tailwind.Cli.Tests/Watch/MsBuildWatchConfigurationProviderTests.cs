@@ -1,7 +1,8 @@
 using System.Text;
 using System.Text.Json;
+using Scarlet.Tailwind.Cli.Watch;
 
-namespace Scarlet.Tailwind.Cli.Tests;
+namespace Scarlet.Tailwind.Cli.Tests.Watch;
 
 public class MsBuildWatchConfigurationProviderTests
 {

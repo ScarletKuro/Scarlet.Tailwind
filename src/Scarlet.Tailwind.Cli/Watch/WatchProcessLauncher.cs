@@ -2,7 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using Scarlet.Tailwind.Core;
 
-namespace Scarlet.Tailwind.Cli;
+namespace Scarlet.Tailwind.Cli.Watch;
 
 /// <summary>
 /// Starts every configured Tailwind watcher in the current foreground console and owns their lifetime.

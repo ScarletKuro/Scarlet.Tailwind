@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Abstractions;
+using Scarlet.Tailwind.Cli.Watch;
 using Scarlet.Tailwind.Core;
 using Scarlet.Tailwind.Core.Providers;
 

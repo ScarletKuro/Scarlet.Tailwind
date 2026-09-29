@@ -1,3 +1,5 @@
+using Scarlet.Tailwind.Cli.Watch;
+
 namespace Scarlet.Tailwind.Cli;
 
 /// <summary>

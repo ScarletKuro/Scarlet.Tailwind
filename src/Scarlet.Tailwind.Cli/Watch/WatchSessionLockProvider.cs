@@ -3,7 +3,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Security.Cryptography;
 using System.Text;
 
-namespace Scarlet.Tailwind.Cli;
+namespace Scarlet.Tailwind.Cli.Watch;
 
 /// <summary>
 /// Holds OS-backed lifetime locks for every file a watch session can generate.

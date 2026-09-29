@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace Scarlet.Tailwind.Cli;
+namespace Scarlet.Tailwind.Cli.Watch;
 
 /// <summary>
 /// Runs every Tailwind entry point resolved from an MSBuild project as a foreground watcher.

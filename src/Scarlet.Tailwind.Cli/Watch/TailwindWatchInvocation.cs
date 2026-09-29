@@ -1,4 +1,4 @@
-namespace Scarlet.Tailwind.Cli;
+namespace Scarlet.Tailwind.Cli.Watch;
 
 internal readonly record struct TailwindWatchInvocation(
     TailwindLaunchRequest Request,

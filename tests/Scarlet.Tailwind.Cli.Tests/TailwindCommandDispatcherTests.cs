@@ -1,5 +1,6 @@
 using System.IO.Abstractions.TestingHelpers;
 using Scarlet.Tailwind.Cli.Tests.Mock;
+using Scarlet.Tailwind.Cli.Watch;
 
 namespace Scarlet.Tailwind.Cli.Tests;
 

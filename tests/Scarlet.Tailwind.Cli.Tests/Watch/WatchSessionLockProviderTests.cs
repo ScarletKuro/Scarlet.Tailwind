@@ -1,4 +1,6 @@
-namespace Scarlet.Tailwind.Cli.Tests;
+using Scarlet.Tailwind.Cli.Watch;
+
+namespace Scarlet.Tailwind.Cli.Tests.Watch;
 
 public class WatchSessionLockProviderTests
 {
