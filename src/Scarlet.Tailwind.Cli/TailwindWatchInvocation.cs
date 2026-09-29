@@ -2,5 +2,7 @@ namespace Scarlet.Tailwind.Cli;
 
 internal readonly record struct TailwindWatchInvocation(
     TailwindLaunchRequest Request,
+    string WorkingDirectory,
     string InputPath,
-    string OutputPath);
+    string OutputPath,
+    IReadOnlyList<string> GeneratedPaths);

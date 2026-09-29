@@ -75,12 +75,9 @@
     </ItemGroup>
   </Target>
 
-  <!-- Explicitly queried by `dotnet tailwind watch`. It resolves the exact executable and arguments used
-       by the build, but never compiles or starts a long-running process inside MSBuild. -->
-  <Target Name="ResolveTailwindWatchConfiguration"
+  <Target Name="_TailwindResolveWatchConfiguration"
           DependsOnTargets="ResolveProjectReferences"
-          Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')"
-          Returns="@(_TailwindWatchInvocations)">
+          Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
     <TailwindCompileTask Compilations="@(TailwindBeforeStaticWebAssets)"
                          ProjectDirectory="$(MSBuildProjectDirectory)"
                          Configuration="$(Configuration)"
@@ -103,6 +100,13 @@
       <Output TaskParameter="WatchInvocations" ItemName="_TailwindWatchInvocations" />
     </TailwindCompileTask>
   </Target>
+
+  <!-- Explicitly queried by `dotnet tailwind watch`. Keeping the public target unconditional means a
+       disabled or unconfigured project succeeds with an empty result instead of returning MSBuild's
+       "Skipped" result. The conditional helper above does the real resolution without compiling. -->
+  <Target Name="ResolveTailwindWatchConfiguration"
+          DependsOnTargets="_TailwindResolveWatchConfiguration"
+          Returns="@(_TailwindWatchInvocations)" />
 
   <!-- Hooked to both targets deliberately. In a single-target-framework project CoreClean runs with
        $(IntermediateOutputPath) set to obj/<config>/<tfm>/, which is where the build wrote the manifest. In

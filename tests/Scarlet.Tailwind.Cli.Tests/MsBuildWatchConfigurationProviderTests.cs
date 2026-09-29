@@ -6,6 +6,25 @@ namespace Scarlet.Tailwind.Cli.Tests;
 public class MsBuildWatchConfigurationProviderTests
 {
     [Fact]
+    public void ParseTargetResult_WithAnEmptySuccessfulTarget_ShouldReturnNoInvocations()
+    {
+        const string json =
+            """
+            {
+              "TargetResults": {
+                "ResolveTailwindWatchConfiguration": {
+                  "Result": "Success"
+                }
+              }
+            }
+            """;
+
+        var result = MsBuildWatchConfigurationProvider.ParseTargetResult(json, "App.csproj");
+
+        Assert.Empty(result);
+    }
+
+    [Fact]
     public void ParseTargetResult_ShouldDecodeArgumentsAndAppendWatchMode()
     {
         var arguments = new[]
@@ -33,9 +52,12 @@ public class MsBuildWatchConfigurationProviderTests
                             ["Identity"] = "Styles/app.css",
                             ["ProtocolVersion"] = "1",
                             ["ExecutablePath"] = "C:\\tools\\tailwindcss.exe",
+                            ["WorkingDirectory"] = "C:\\repo with spaces",
                             ["InputPath"] = "C:\\repo with spaces\\Styles\\app.css",
                             ["OutputPath"] = "C:\\repo with spaces\\wwwroot\\css\\app.css",
-                            ["ArgumentsBase64"] = encoded
+                            ["ArgumentsBase64"] = encoded,
+                            ["GeneratedPathsBase64"] = Convert.ToBase64String(
+                                Encoding.UTF8.GetBytes("C:\\repo with spaces\\wwwroot\\css\\app.css"))
                         }
                     }
                 }
@@ -46,7 +68,9 @@ public class MsBuildWatchConfigurationProviderTests
 
         var invocation = Assert.Single(result);
         Assert.Equal("C:\\tools\\tailwindcss.exe", invocation.Request.ExecutablePath);
+        Assert.Equal("C:\\repo with spaces", invocation.WorkingDirectory);
         Assert.Equal([.. arguments, "--watch=always"], invocation.Request.Arguments);
+        Assert.Equal(["C:\\repo with spaces\\wwwroot\\css\\app.css"], invocation.GeneratedPaths);
     }
 
     [Fact]
@@ -62,9 +86,11 @@ public class MsBuildWatchConfigurationProviderTests
                     {
                       "ProtocolVersion": "99",
                       "ExecutablePath": "tailwindcss",
+                      "WorkingDirectory": "/repo",
                       "InputPath": "app.css",
                       "OutputPath": "out.css",
-                      "ArgumentsBase64": "YXBwLmNzcw=="
+                      "ArgumentsBase64": "YXBwLmNzcw==",
+                      "GeneratedPathsBase64": "b3V0LmNzcw=="
                     }
                   ]
                 }
@@ -76,5 +102,36 @@ public class MsBuildWatchConfigurationProviderTests
             () => MsBuildWatchConfigurationProvider.ParseTargetResult(json, "App.csproj"));
 
         Assert.Contains("protocol version '99'", exception.Message);
+    }
+
+    [Fact]
+    public void ParseTargetResult_WithOlderVersionOneMetadata_ShouldUseSafeFallbacks()
+    {
+        const string json =
+            """
+            {
+              "TargetResults": {
+                "ResolveTailwindWatchConfiguration": {
+                  "Result": "Success",
+                  "Items": [
+                    {
+                      "ProtocolVersion": "1",
+                      "ExecutablePath": "tailwindcss",
+                      "InputPath": "Styles/app.css",
+                      "OutputPath": "wwwroot/css/app.css",
+                      "ArgumentsBase64": "LS1pbnB1dA=="
+                    }
+                  ]
+                }
+              }
+            }
+            """;
+
+        var projectPath = Path.Combine(Path.GetTempPath(), "repo", "App.csproj");
+        var invocation = Assert.Single(
+            MsBuildWatchConfigurationProvider.ParseTargetResult(json, projectPath));
+
+        Assert.Equal(Path.GetDirectoryName(projectPath), invocation.WorkingDirectory);
+        Assert.Equal(["wwwroot/css/app.css"], invocation.GeneratedPaths);
     }
 }

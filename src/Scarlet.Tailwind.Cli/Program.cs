@@ -59,6 +59,7 @@ internal static class Program
             new TailwindWatchCommand(
                 new MsBuildWatchConfigurationProvider(),
                 new WatchProcessLauncher(log),
+                new WatchSessionLockProvider(options.CacheRoot),
                 Console.Out,
                 Console.Error,
                 Directory.GetCurrentDirectory),

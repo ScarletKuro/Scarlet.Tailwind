@@ -9,6 +9,7 @@ internal sealed class TailwindWatchCommand : ITailwindWatchCommand
 {
     private readonly ITailwindWatchConfigurationProvider _configurationProvider;
     private readonly IWatchProcessLauncher _launcher;
+    private readonly IWatchSessionLockProvider _sessionLocks;
     private readonly TextWriter _stdout;
     private readonly TextWriter _stderr;
     private readonly Func<string> _getCurrentDirectory;
@@ -16,12 +17,14 @@ internal sealed class TailwindWatchCommand : ITailwindWatchCommand
     public TailwindWatchCommand(
         ITailwindWatchConfigurationProvider configurationProvider,
         IWatchProcessLauncher launcher,
+        IWatchSessionLockProvider sessionLocks,
         TextWriter stdout,
         TextWriter stderr,
         Func<string> getCurrentDirectory)
     {
         _configurationProvider = configurationProvider;
         _launcher = launcher;
+        _sessionLocks = sessionLocks;
         _stdout = stdout;
         _stderr = stderr;
         _getCurrentDirectory = getCurrentDirectory;
@@ -53,15 +56,21 @@ internal sealed class TailwindWatchCommand : ITailwindWatchCommand
                 return ExitCodes.UsageError;
             }
 
-            _stderr.WriteLine(
-                $"Scarlet.Tailwind: watching {configuration.Count} Tailwind entry point(s)");
+            if (!_sessionLocks.TryAcquire(configuration, out var sessionLock))
+            {
+                _stderr.WriteLine("Scarlet.Tailwind: a watcher is already running for one or more configured outputs.");
+                return ExitCodes.Success;
+            }
+
+            using var sessionLease = sessionLock;
+            _stderr.WriteLine($"Scarlet.Tailwind: watching {configuration.Count} Tailwind entry point(s)");
 
             foreach (var invocation in configuration)
             {
                 _stderr.WriteLine($"Scarlet.Tailwind:   {invocation.InputPath} -> {invocation.OutputPath}");
             }
 
-            return _launcher.Run(configuration.Select(static item => item.Request));
+            return _launcher.Run(configuration);
         }
         catch (TailwindWatchException exception)
         {

@@ -11,9 +11,10 @@ dotnet tailwind --help
 ```
 
 Every argument is forwarded to Tailwind verbatim, so anything valid after `tailwindcss` is valid after
-`dotnet tailwind`. The one command name reserved by Scarlet is `watch` in first position; it reads the
-entry points already configured by `Scarlet.Tailwind.MSBuild`. Set `SCARLET_TAILWIND_PASSTHROUGH=1` if an
-upstream Tailwind command with that name ever needs to be forwarded instead.
+`dotnet tailwind`; the first two examples above use the CLI independently. The one command name reserved by
+Scarlet is `watch` in first position. That third example integrates with `Scarlet.Tailwind.MSBuild` by
+reading its configured entry points. Set `SCARLET_TAILWIND_PASSTHROUGH=1` if an upstream Tailwind command
+with that name ever needs to be forwarded instead.
 
 ## Why not just download the standalone CLI?
 
@@ -55,8 +56,9 @@ Or once, without installing anything (.NET 10 SDK):
 dnx Scarlet.Tailwind.Cli -- --input app.css --output out.css
 ```
 
-> **The package version is the Tailwind version.** `Scarlet.Tailwind.Cli` 4.3.3 contains Tailwind CSS
-> 4.3.3, the same as the `Scarlet.Tailwind.Runtime.*` packages.
+> **The package version identifies the Tailwind version.** `Scarlet.Tailwind.Cli` 4.3.3 contains Tailwind
+> CSS 4.3.3; a CLI-only revision such as 4.3.3.1 still contains Tailwind CSS 4.3.3. The runtime packages use
+> the Tailwind version without that optional revision.
 
 To move to a newer Tailwind, update the package like any other .NET tool — no separate upgrade command
 needed:
@@ -166,8 +168,10 @@ project, and adds Tailwind's watch flag itself. It also supports multiple config
 duplicating any input or output paths on the command line.
 
 The command stays in the foreground and owns every native Tailwind process it starts. Closing the terminal
-or pressing Ctrl+C ends the whole watch session. For example, the equivalent raw form for a single entry
-point remains available when no MSBuild project is involved:
+or pressing Ctrl+C ends the whole watch session. A second command targeting any of the same generated files
+exits without launching duplicate writers. Each native process also runs from the project directory, exactly
+like the MSBuild task. For example, the equivalent raw form for a single entry point remains available when
+no MSBuild project is involved:
 
 ```bash
 dotnet tailwind --input Styles/app.css --output wwwroot/css/app.css --watch

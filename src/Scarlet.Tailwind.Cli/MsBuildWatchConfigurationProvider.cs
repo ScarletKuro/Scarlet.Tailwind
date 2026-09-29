@@ -75,7 +75,12 @@ internal sealed class MsBuildWatchConfigurationProvider : ITailwindWatchConfigur
             }
 
             var result = new List<TailwindWatchInvocation>();
-            foreach (var item in target.GetProperty("Items").EnumerateArray())
+            if (!target.TryGetProperty("Items", out var items))
+            {
+                return result;
+            }
+
+            foreach (var item in items.EnumerateArray())
             {
                 var protocolVersion = GetRequiredString(item, "ProtocolVersion");
                 if (!string.Equals(protocolVersion, ProtocolVersion, StringComparison.Ordinal))
@@ -88,12 +93,21 @@ internal sealed class MsBuildWatchConfigurationProvider : ITailwindWatchConfigur
                 var inputPath = GetRequiredString(item, "InputPath");
                 var outputPath = GetRequiredString(item, "OutputPath");
                 var arguments = DecodeArguments(GetRequiredString(item, "ArgumentsBase64"));
+                // Both fields were added compatibly to protocol v1. Older tool/package combinations still
+                // get the original behavior instead of failing configuration discovery.
+                var workingDirectory = GetOptionalString(item, "WorkingDirectory")
+                    ?? Path.GetDirectoryName(Path.GetFullPath(projectPath))!;
+                var generatedPaths = GetOptionalString(item, "GeneratedPathsBase64") is { } encodedPaths
+                    ? DecodeArguments(encodedPaths)
+                    : [outputPath];
                 arguments.Add("--watch=always");
 
                 result.Add(new TailwindWatchInvocation(
                     new TailwindLaunchRequest(executablePath, arguments),
+                    workingDirectory,
                     inputPath,
-                    outputPath));
+                    outputPath,
+                    generatedPaths));
             }
 
             return result;
@@ -159,5 +173,21 @@ internal sealed class MsBuildWatchConfigurationProvider : ITailwindWatchConfigur
         }
 
         return property.GetString()!;
+    }
+
+    private static string? GetOptionalString(JsonElement item, string propertyName)
+    {
+        if (!item.TryGetProperty(propertyName, out var property))
+        {
+            return null;
+        }
+
+        if (property.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(property.GetString()))
+        {
+            throw new TailwindWatchException($"MSBuild returned invalid watch metadata '{propertyName}'.");
+        }
+
+        return property.GetString();
     }
 }

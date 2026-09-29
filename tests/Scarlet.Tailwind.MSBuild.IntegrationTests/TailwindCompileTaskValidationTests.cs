@@ -53,9 +53,15 @@ public class TailwindCompileTaskValidationTests
             .Split(';')
             .Select(encoded => System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)))
             .ToArray();
+        var generatedPaths = invocation.GetMetadata("GeneratedPathsBase64")
+            .Split(';')
+            .Select(encoded => System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)))
+            .ToArray();
 
         Assert.Equal("1", invocation.GetMetadata("ProtocolVersion"));
         Assert.Equal(executable, invocation.GetMetadata("ExecutablePath"));
+        Assert.Equal(workspace.RootDirectory, invocation.GetMetadata("WorkingDirectory"));
+        Assert.Equal([Path.Combine(workspace.RootDirectory, "wwwroot", "css", "app.css")], generatedPaths);
         Assert.Contains($"--input={Path.Combine(workspace.RootDirectory, "Styles", "app.css")}", arguments);
         Assert.Contains($"--output={Path.Combine(workspace.RootDirectory, "wwwroot", "css", "app.css")}", arguments);
         Assert.Contains("value with spaces", arguments);

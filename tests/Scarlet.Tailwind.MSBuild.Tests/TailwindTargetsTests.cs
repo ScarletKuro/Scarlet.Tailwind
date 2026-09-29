@@ -36,6 +36,7 @@ public class TailwindTargetsTests
     private static readonly string[] TargetNames =
     [
         "_TailwindResolveManifestDirectory",
+        "_TailwindResolveWatchConfiguration",
         "ResolveTailwindWatchConfiguration",
         "RunTailwindBeforeStaticWebAssets",
         "TailwindClean"
@@ -114,7 +115,8 @@ public class TailwindTargetsTests
     // The development copy has to build the task assembly before it can call into it, so it prefixes one
     // extra dependency; the packaged copy ships that assembly and must not carry it.
     [InlineData("_TailwindResolveManifestDirectory", null)]
-    [InlineData("ResolveTailwindWatchConfiguration", "ResolveProjectReferences")]
+    [InlineData("_TailwindResolveWatchConfiguration", "ResolveProjectReferences")]
+    [InlineData("ResolveTailwindWatchConfiguration", null)]
     [InlineData("TailwindClean", null)]
     [InlineData("RunTailwindBeforeStaticWebAssets", "ResolveProjectReferences")]
     public void DevelopmentTargets_ShouldStayInSyncWithPackagedTargets(string targetName, string? developmentOnlyPrefix)
@@ -226,6 +228,40 @@ public class TailwindTargetsTests
 
             Assert.Equal(expected, captured);
         }
+    }
+
+    [Theory]
+    [InlineData(PackagedTargets)]
+    [InlineData(MultiTargetingTargets)]
+    [InlineData(DevelopmentTargets)]
+    public void ResolveWatchConfiguration_ShouldReturnAnEmptySuccessfulResultWhenResolutionIsDisabled(
+        string targetsRelativePath)
+    {
+        var project = LoadProject(targetsRelativePath);
+        var publicTarget = Assert.Single(
+            project.Elements("Target"),
+            target => target.Attribute("Name")?.Value == "ResolveTailwindWatchConfiguration");
+        var helperTarget = Assert.Single(
+            project.Elements("Target"),
+            target => target.Attribute("Name")?.Value == "_TailwindResolveWatchConfiguration");
+        var publicDependsOn = publicTarget.Attribute("DependsOnTargets")?.Value;
+        var helperCondition = helperTarget.Attribute("Condition")?.Value;
+
+        Assert.Null(publicTarget.Attribute("Condition"));
+        Assert.NotNull(publicDependsOn);
+        Assert.NotNull(helperCondition);
+        Assert.Contains(
+            "_TailwindResolveWatchConfiguration",
+            publicDependsOn,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "'$(TailwindEnabled)' == 'true'",
+            helperCondition,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "'@(TailwindBeforeStaticWebAssets)' != ''",
+            helperCondition,
+            StringComparison.Ordinal);
     }
 
     public static TheoryData<string> EveryTargetName()

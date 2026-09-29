@@ -62,8 +62,9 @@ public sealed class TailwindCompileTask : Task
     public ITaskItem[] RemovedFiles { get; private set; } = Array.Empty<ITaskItem>();
 
     /// <summary>
-    /// Fully resolved Tailwind invocations for a long-running watcher. Arguments are base64 encoded individually
-    /// in the <c>ArgumentsBase64</c> metadata so MSBuild can return them without losing quoting or empty tokens.
+    /// Fully resolved Tailwind invocations for a long-running watcher, including the project working directory and
+    /// generated paths. Arguments and paths are base64 encoded individually so MSBuild can return them without
+    /// losing quoting, separators or empty tokens.
     /// </summary>
     [Output]
     public ITaskItem[] WatchInvocations { get; private set; } = Array.Empty<ITaskItem>();
@@ -175,12 +176,16 @@ public sealed class TailwindCompileTask : Task
         var item = new TaskItem(entry.InputPath);
         var encodedArguments = BuildArguments(entry)
             .Select(static argument => Convert.ToBase64String(Encoding.UTF8.GetBytes(argument)));
+        var encodedGeneratedPaths = entry.ExpectedOutputs
+            .Select(static path => Convert.ToBase64String(Encoding.UTF8.GetBytes(path)));
 
         item.SetMetadata("ProtocolVersion", "1");
         item.SetMetadata("ExecutablePath", tailwindPath);
+        item.SetMetadata("WorkingDirectory", ProjectDirectory);
         item.SetMetadata("InputPath", entry.InputPath);
         item.SetMetadata("OutputPath", entry.OutputPath);
         item.SetMetadata("ArgumentsBase64", string.Join(";", encodedArguments));
+        item.SetMetadata("GeneratedPathsBase64", string.Join(";", encodedGeneratedPaths));
 
         return item;
     }

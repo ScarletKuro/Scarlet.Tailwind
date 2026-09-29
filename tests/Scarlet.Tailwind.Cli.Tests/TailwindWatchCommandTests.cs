@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 
 namespace Scarlet.Tailwind.Cli.Tests;
 
@@ -13,6 +14,7 @@ public class TailwindWatchCommandTests
         var command = new TailwindWatchCommand(
             provider,
             launcher,
+            new RecordingSessionLockProvider(),
             new StringWriter(),
             stderr,
             () => "/repo/app");
@@ -23,7 +25,8 @@ public class TailwindWatchCommandTests
         Assert.Null(provider.Project);
         Assert.Equal("Debug", provider.Configuration);
         Assert.Equal("/repo/app", provider.CurrentDirectory);
-        Assert.Equal(provider.Invocations.Select(static invocation => invocation.Request), launcher.Requests);
+        Assert.NotNull(launcher.Invocations);
+        Assert.Equal(provider.Invocations, launcher.Invocations);
         Assert.Contains("watching 1 Tailwind entry point", stderr.ToString());
     }
 
@@ -34,6 +37,7 @@ public class TailwindWatchCommandTests
         var command = new TailwindWatchCommand(
             provider,
             new RecordingWatchLauncher(),
+            new RecordingSessionLockProvider(),
             new StringWriter(),
             new StringWriter(),
             () => "/repo");
@@ -52,6 +56,7 @@ public class TailwindWatchCommandTests
         var command = new TailwindWatchCommand(
             provider,
             new RecordingWatchLauncher(),
+            new RecordingSessionLockProvider(),
             new StringWriter(),
             new StringWriter(),
             () => "/repo");
@@ -73,6 +78,7 @@ public class TailwindWatchCommandTests
         var command = new TailwindWatchCommand(
             provider,
             new RecordingWatchLauncher(),
+            new RecordingSessionLockProvider(),
             stdout,
             new StringWriter(),
             () => "/repo");
@@ -93,6 +99,7 @@ public class TailwindWatchCommandTests
         var command = new TailwindWatchCommand(
             provider,
             launcher,
+            new RecordingSessionLockProvider(),
             new StringWriter(),
             stderr,
             () => "/repo");
@@ -100,7 +107,7 @@ public class TailwindWatchCommandTests
         var result = command.Run([]);
 
         Assert.Equal(ExitCodes.UsageError, result);
-        Assert.Null(launcher.Requests);
+        Assert.Null(launcher.Invocations);
         Assert.Contains("no enabled", stderr.ToString());
     }
 
@@ -114,6 +121,7 @@ public class TailwindWatchCommandTests
         var command = new TailwindWatchCommand(
             provider,
             new RecordingWatchLauncher(),
+            new RecordingSessionLockProvider(),
             new StringWriter(),
             new StringWriter(),
             () => "/repo");
@@ -134,6 +142,7 @@ public class TailwindWatchCommandTests
         var command = new TailwindWatchCommand(
             provider,
             new RecordingWatchLauncher(),
+            new RecordingSessionLockProvider(),
             new StringWriter(),
             stderr,
             () => "/repo");
@@ -153,6 +162,7 @@ public class TailwindWatchCommandTests
             new ThrowingConfigurationProvider(
                 new TailwindWatchException("could not evaluate the project", ExitCodes.TailwindNotFound)),
             new RecordingWatchLauncher(),
+            new RecordingSessionLockProvider(),
             new StringWriter(),
             stderr,
             () => "/repo");
@@ -170,6 +180,7 @@ public class TailwindWatchCommandTests
         var command = new TailwindWatchCommand(
             new RecordingConfigurationProvider(),
             new ThrowingWatchLauncher(new Win32Exception(13, "Permission denied")),
+            new RecordingSessionLockProvider(),
             new StringWriter(),
             stderr,
             () => "/repo");
@@ -180,14 +191,36 @@ public class TailwindWatchCommandTests
         Assert.Contains("failed to start a watch process: Permission denied", stderr.ToString());
     }
 
+    [Fact]
+    public void Run_WhenAnOutputIsAlreadyWatched_ShouldExitWithoutStartingAnotherProcess()
+    {
+        var launcher = new RecordingWatchLauncher();
+        var stderr = new StringWriter();
+        var command = new TailwindWatchCommand(
+            new RecordingConfigurationProvider(),
+            launcher,
+            new RecordingSessionLockProvider { AcquiredLock = null },
+            new StringWriter(),
+            stderr,
+            () => "/repo");
+
+        var result = command.Run([]);
+
+        Assert.Equal(ExitCodes.Success, result);
+        Assert.Null(launcher.Invocations);
+        Assert.Contains("already running", stderr.ToString());
+    }
+
     private sealed class RecordingConfigurationProvider : ITailwindWatchConfigurationProvider
     {
         public IReadOnlyList<TailwindWatchInvocation> Invocations { get; set; } =
         [
             new(
                 new TailwindLaunchRequest("tailwindcss", ["--input=/repo/Styles/app.css", "--watch=always"]),
+                "/repo",
                 "/repo/Styles/app.css",
-                "/repo/wwwroot/css/app.css")
+                "/repo/wwwroot/css/app.css",
+                ["/repo/wwwroot/css/app.css"])
         ];
 
         public string? Project { get; private set; }
@@ -208,11 +241,11 @@ public class TailwindWatchCommandTests
 
     private sealed class RecordingWatchLauncher : IWatchProcessLauncher
     {
-        public IEnumerable<TailwindLaunchRequest>? Requests { get; private set; }
+        public IEnumerable<TailwindWatchInvocation>? Invocations { get; private set; }
 
-        public int Run(IEnumerable<TailwindLaunchRequest> requests)
+        public int Run(IEnumerable<TailwindWatchInvocation> invocations)
         {
-            Requests = requests;
+            Invocations = invocations;
             return 0;
         }
     }
@@ -228,6 +261,26 @@ public class TailwindWatchCommandTests
 
     private sealed class ThrowingWatchLauncher(Win32Exception exception) : IWatchProcessLauncher
     {
-        public int Run(IEnumerable<TailwindLaunchRequest> requests) => throw exception;
+        public int Run(IEnumerable<TailwindWatchInvocation> invocations) => throw exception;
+    }
+
+    private sealed class RecordingSessionLockProvider : IWatchSessionLockProvider
+    {
+        public IDisposable? AcquiredLock { get; set; } = new NoopDisposable();
+
+        public bool TryAcquire(
+            IReadOnlyList<TailwindWatchInvocation> invocations,
+            [NotNullWhen(true)] out IDisposable? lease)
+        {
+            lease = AcquiredLock;
+            return lease is not null;
+        }
+    }
+
+    private sealed class NoopDisposable : IDisposable
+    {
+        public void Dispose()
+        {
+        }
     }
 }

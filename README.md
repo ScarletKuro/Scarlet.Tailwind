@@ -45,14 +45,25 @@ cleaning, and `dotnet watch` integration.
 
 ### Scarlet.Tailwind.Cli — Tailwind on the command line
 
+Use the CLI independently by passing Tailwind's native arguments directly:
+
 ```bash
 dotnet new tool-manifest
 dotnet tool install Scarlet.Tailwind.Cli
+dotnet tailwind --input Styles/app.css --output wwwroot/css/app.css --watch
+```
+
+When the project also references `Scarlet.Tailwind.MSBuild`, the two packages work together for a better
+watch loop: the project-aware command reuses every evaluated entry point and build setting without repeating
+paths on the command line.
+
+```bash
 dotnet tailwind watch
 ```
 
-The tool version is the Tailwind version, so `.config/dotnet-tools.json` pins Tailwind alongside the rest
-of your tooling. `Scarlet.Tailwind.Cli` is a pointer package; installing it also pulls a matching
+The tool version identifies the bundled Tailwind version, with an optional fourth component for CLI-only
+revisions, so `.config/dotnet-tools.json` pins Tailwind alongside the rest of your tooling.
+`Scarlet.Tailwind.Cli` is a pointer package; installing it also pulls a matching
 `Scarlet.Tailwind.Cli.*` sub-package for your platform, and that one embeds Tailwind, so it needs no network
 at run time.
 

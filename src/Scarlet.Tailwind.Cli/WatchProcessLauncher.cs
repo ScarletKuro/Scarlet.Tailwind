@@ -14,27 +14,15 @@ internal sealed class WatchProcessLauncher : IWatchProcessLauncher
 
     public WatchProcessLauncher(ITailwindLogger log) => _log = log;
 
-    public int Run(IEnumerable<TailwindLaunchRequest> requests)
+    public int Run(IEnumerable<TailwindWatchInvocation> invocations)
     {
         var processes = new List<Process>();
 
         try
         {
-            foreach (var request in requests)
+            foreach (var invocation in invocations)
             {
-                var startInfo = new ProcessStartInfo(request.ExecutablePath)
-                {
-                    UseShellExecute = false,
-                    CreateNoWindow = false,
-                    RedirectStandardInput = false,
-                    RedirectStandardOutput = false,
-                    RedirectStandardError = false
-                };
-
-                foreach (var argument in request.Arguments)
-                {
-                    startInfo.ArgumentList.Add(argument);
-                }
+                var startInfo = CreateStartInfo(invocation);
 
                 var process = new Process { StartInfo = startInfo };
                 ProcessStartRetry.Start(process, _log);
@@ -72,5 +60,26 @@ internal sealed class WatchProcessLauncher : IWatchProcessLauncher
                 process.Dispose();
             }
         }
+    }
+
+    internal static ProcessStartInfo CreateStartInfo(TailwindWatchInvocation invocation)
+    {
+        var request = invocation.Request;
+        var startInfo = new ProcessStartInfo(request.ExecutablePath)
+        {
+            UseShellExecute = false,
+            CreateNoWindow = false,
+            RedirectStandardInput = false,
+            RedirectStandardOutput = false,
+            RedirectStandardError = false,
+            WorkingDirectory = invocation.WorkingDirectory
+        };
+
+        foreach (var argument in request.Arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        return startInfo;
     }
 }

@@ -408,7 +408,7 @@ directly only if you need a compile outside that target.
 | --- | --- |
 | `GeneratedFiles` | Every generated CSS and external source-map file. Each carries `RelativePath` metadata used to add it to `@(Content)` and `@(FileWrites)` |
 | `RemovedFiles` | Previously generated files that are no longer produced, removed from `@(Content)` and `@(None)` so stale assets are not served |
-| `WatchInvocations` | Resolved executable and encoded argument vectors returned by `ResolveTailwindWatchConfiguration` |
+| `WatchInvocations` | Resolved executable, project working directory, generated paths and encoded argument vectors returned by `ResolveTailwindWatchConfiguration` |
 
 `RemovedFiles` is what stops a stale `app.css.map` being served after you turn maps off: the targets drop it
 from `@(Content)` and the task deletes it.
