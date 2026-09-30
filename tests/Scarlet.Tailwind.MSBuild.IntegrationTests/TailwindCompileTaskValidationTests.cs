@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Build.Utilities;
 using Xunit.Abstractions;
 
@@ -51,11 +52,11 @@ public class TailwindCompileTaskValidationTests
         var invocation = Assert.Single(task.WatchInvocations);
         var arguments = invocation.GetMetadata("ArgumentsBase64")
             .Split(';')
-            .Select(encoded => System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)))
+            .Select(encoded => Encoding.UTF8.GetString(Convert.FromBase64String(encoded)))
             .ToArray();
         var generatedPaths = invocation.GetMetadata("GeneratedPathsBase64")
             .Split(';')
-            .Select(encoded => System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(encoded)))
+            .Select(encoded => Encoding.UTF8.GetString(Convert.FromBase64String(encoded)))
             .ToArray();
 
         Assert.Equal("1", invocation.GetMetadata("ProtocolVersion"));

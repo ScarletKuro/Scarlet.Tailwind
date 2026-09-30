@@ -57,8 +57,7 @@ public class MsBuildWatchConfigurationProviderTests
                             ["InputPath"] = "C:\\repo with spaces\\Styles\\app.css",
                             ["OutputPath"] = "C:\\repo with spaces\\wwwroot\\css\\app.css",
                             ["ArgumentsBase64"] = encoded,
-                            ["GeneratedPathsBase64"] = Convert.ToBase64String(
-                                Encoding.UTF8.GetBytes("C:\\repo with spaces\\wwwroot\\css\\app.css"))
+                            ["GeneratedPathsBase64"] = Convert.ToBase64String("C:\\repo with spaces\\wwwroot\\css\\app.css"u8.ToArray())
                         }
                     }
                 }

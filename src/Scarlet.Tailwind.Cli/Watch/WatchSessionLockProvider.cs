@@ -32,8 +32,7 @@ internal sealed class WatchSessionLockProvider : IWatchSessionLockProvider
 
             foreach (var output in outputs)
             {
-                var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(output)))
-                    .ToLowerInvariant();
+                var hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(output)));
                 var lockPath = Path.Combine(lockDirectory, hash + ".lock");
 
                 FileStream stream;
