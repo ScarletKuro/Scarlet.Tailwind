@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
-using System.Runtime.InteropServices;
 using Scarlet.Tailwind.Core;
 
 namespace Scarlet.Tailwind.Cli;
@@ -55,113 +54,10 @@ internal sealed class ProcessLauncher : IProcessLauncher
         // downloaded, or just been run, by a step moments earlier, and can race the same ETXTBSY window.
         ProcessStartRetry.Start(process, _log);
 
-        using var signals = new SignalBridge(process);
+        using var signals = new ProcessSignalBridge([process]);
 
         process.WaitForExit();
 
         return process.ExitCode;
-    }
-
-    /// <summary>
-    /// Keeps the wrapper alive until Tailwind exits, and makes sure Tailwind hears about termination.
-    /// </summary>
-    /// <remarks>
-    /// Two failure modes this exists to prevent: the wrapper dying first, which returns the shell prompt
-    /// while Tailwind is still drawing to the terminal; and Tailwind being orphaned, which .NET 10 made easier by
-    /// removing the runtime's default SIGTERM and SIGHUP handling.
-    /// </remarks>
-    private sealed class SignalBridge : IDisposable
-    {
-        private readonly Process _process;
-        private readonly bool _childSharesProcessGroup;
-        private readonly List<PosixSignalRegistration> _registrations = new();
-        private readonly EventHandler _processExitHandler;
-
-        public SignalBridge(Process process)
-        {
-            _process = process;
-            _childSharesProcessGroup = PosixInterop.SharesProcessGroup(process.Id);
-
-            Register(PosixSignal.SIGINT, OnInterrupt);
-            Register(PosixSignal.SIGQUIT, OnInterrupt);
-            Register(PosixSignal.SIGTERM, OnTerminate);
-            Register(PosixSignal.SIGHUP, OnTerminate);
-
-            // Last resort for paths that bypass the handlers entirely.
-            _processExitHandler = (_, _) => TryKill();
-            AppDomain.CurrentDomain.ProcessExit += _processExitHandler;
-        }
-
-        public void Dispose()
-        {
-            AppDomain.CurrentDomain.ProcessExit -= _processExitHandler;
-
-            foreach (var registration in _registrations)
-            {
-                registration.Dispose();
-            }
-
-            _registrations.Clear();
-        }
-
-        private void Register(PosixSignal signal, Action<PosixSignalContext> handler)
-        {
-            try
-            {
-                _registrations.Add(PosixSignalRegistration.Create(signal, handler));
-            }
-            catch (Exception)
-            {
-                // Not every signal is supported on every host. Losing one handler must not stop the tool
-                // from running Tailwind at all.
-            }
-        }
-
-        // Ctrl+C and Ctrl+Break are delivered by the OS to the whole console / foreground process group, so
-        // Tailwind already got it. Killing it here would rob it of a graceful shutdown; exiting here would hand
-        // the prompt back while it is still running. So: cancel our own termination and keep waiting.
-        private void OnInterrupt(PosixSignalContext context)
-        {
-            context.Cancel = true;
-
-            if (!_childSharesProcessGroup)
-            {
-                PosixInterop.Send(_process.Id, PosixInterop.SIGINT);
-            }
-        }
-
-        // SIGTERM and SIGHUP are sent to this process alone, so they have to be forwarded explicitly.
-        private void OnTerminate(PosixSignalContext context)
-        {
-            if (OperatingSystem.IsWindows())
-            {
-                // Cancellation is not honoured for SIGTERM on Windows; this is the last chance to take Tailwind
-                // down with us rather than orphan it.
-                TryKill();
-
-                return;
-            }
-
-            context.Cancel = true;
-
-            PosixInterop.Send(
-                _process.Id,
-                context.Signal == PosixSignal.SIGHUP ? PosixInterop.SIGHUP : PosixInterop.SIGTERM);
-        }
-
-        private void TryKill()
-        {
-            try
-            {
-                if (!_process.HasExited)
-                {
-                    _process.Kill(entireProcessTree: true);
-                }
-            }
-            catch (Exception)
-            {
-                // Already gone, or we lost the right to signal it. Either way there is nothing to do.
-            }
-        }
     }
 }

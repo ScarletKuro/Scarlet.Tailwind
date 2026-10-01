@@ -111,9 +111,17 @@ jobs:
           VERSION="0.0.1-ci.${{ github.run_number }}"
           echo "Packing with version: $VERSION"
 
-          # Extract TailwindVersion from Directory.Build.props
+          # Runtime packages follow the upstream Tailwind version. CLI packages have an independent
+          # revision so a CLI-only fix can be published without a new upstream Tailwind release.
           TAILWIND_VERSION=$(sed -n 's/.*<TailwindVersion>\([^<]*\)<\/TailwindVersion>.*/\1/p' Directory.Build.props)
+          TAILWIND_CLI_REVISION=$(sed -n 's/.*<TailwindCliRevision>\([^<]*\)<\/TailwindCliRevision>.*/\1/p' Directory.Build.props)
+          if [ "$TAILWIND_CLI_REVISION" = "0" ]; then
+            CLI_VERSION="$TAILWIND_VERSION"
+          else
+            CLI_VERSION="$TAILWIND_VERSION.$TAILWIND_CLI_REVISION"
+          fi
           echo "Runtime package version (TailwindVersion): $TAILWIND_VERSION"
+          echo "CLI package version: $CLI_VERSION"
 
           # Pack the main MSBuild package
           dotnet pack src/Scarlet.Tailwind.MSBuild/Scarlet.Tailwind.MSBuild.csproj \
@@ -160,6 +168,7 @@ jobs:
 
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAILWIND_VERSION=$TAILWIND_VERSION" >> $GITHUB_ENV
+          echo "CLI_VERSION=$CLI_VERSION" >> $GITHUB_ENV
 
       - name: List generated packages
         shell: bash
@@ -212,7 +221,14 @@ jobs:
         shell: bash
         run: |
           chmod +x tests/e2e/cli-tool/verify.sh
-          tests/e2e/cli-tool/verify.sh "${{ github.workspace }}" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+          tests/e2e/cli-tool/verify.sh "${{ github.workspace }}" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}" "${{ env.CLI_VERSION }}"
+
+      - name: E2E Test - Tailwind Watch with Blazor Hot Reload
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          chmod +x tests/e2e/hot-reload/verify.sh
+          tests/e2e/hot-reload/verify.sh "${{ github.workspace }}" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}" "${{ env.CLI_VERSION }}"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v7
@@ -299,9 +315,17 @@ jobs:
           VERSION="0.0.1-ci.${{ github.run_number }}"
           echo "Packing with version: $VERSION"
 
-          # Extract TailwindVersion from Directory.Build.props
+          # Runtime packages follow the upstream Tailwind version. CLI packages have an independent
+          # revision so a CLI-only fix can be published without a new upstream Tailwind release.
           TAILWIND_VERSION=$(sed -n 's/.*<TailwindVersion>\([^<]*\)<\/TailwindVersion>.*/\1/p' Directory.Build.props)
+          TAILWIND_CLI_REVISION=$(sed -n 's/.*<TailwindCliRevision>\([^<]*\)<\/TailwindCliRevision>.*/\1/p' Directory.Build.props)
+          if [ "$TAILWIND_CLI_REVISION" = "0" ]; then
+            CLI_VERSION="$TAILWIND_VERSION"
+          else
+            CLI_VERSION="$TAILWIND_VERSION.$TAILWIND_CLI_REVISION"
+          fi
           echo "Runtime package version (TailwindVersion): $TAILWIND_VERSION"
+          echo "CLI package version: $CLI_VERSION"
 
           # Needed by the package-installation E2E test below, which references it by name/version.
           dotnet pack src/Scarlet.Tailwind.MSBuild/Scarlet.Tailwind.MSBuild.csproj \
@@ -325,6 +349,7 @@ jobs:
 
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "TAILWIND_VERSION=$TAILWIND_VERSION" >> $GITHUB_ENV
+          echo "CLI_VERSION=$CLI_VERSION" >> $GITHUB_ENV
 
       - name: List generated packages
         run: ls -lh ./packages/
@@ -372,7 +397,14 @@ jobs:
         shell: bash
         run: |
           chmod +x tests/e2e/cli-tool/verify.sh
-          tests/e2e/cli-tool/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}"
+          tests/e2e/cli-tool/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}" "${{ env.CLI_VERSION }}"
+
+      - name: E2E Test - Tailwind Watch with Blazor Hot Reload
+        shell: bash
+        timeout-minutes: 5
+        run: |
+          chmod +x tests/e2e/hot-reload/verify.sh
+          tests/e2e/hot-reload/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}" "${{ env.CLI_VERSION }}"
 
       - name: Upload coverage to Codecov
         if: matrix.arch == 'x64'

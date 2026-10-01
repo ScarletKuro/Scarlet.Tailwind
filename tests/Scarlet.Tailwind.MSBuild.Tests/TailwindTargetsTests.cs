@@ -36,6 +36,8 @@ public class TailwindTargetsTests
     private static readonly string[] TargetNames =
     [
         "_TailwindResolveManifestDirectory",
+        "_TailwindResolveWatchConfiguration",
+        "ResolveTailwindWatchConfiguration",
         "RunTailwindBeforeStaticWebAssets",
         "TailwindClean"
     ];
@@ -113,6 +115,8 @@ public class TailwindTargetsTests
     // The development copy has to build the task assembly before it can call into it, so it prefixes one
     // extra dependency; the packaged copy ships that assembly and must not carry it.
     [InlineData("_TailwindResolveManifestDirectory", null)]
+    [InlineData("_TailwindResolveWatchConfiguration", "ResolveProjectReferences")]
+    [InlineData("ResolveTailwindWatchConfiguration", null)]
     [InlineData("TailwindClean", null)]
     [InlineData("RunTailwindBeforeStaticWebAssets", "ResolveProjectReferences")]
     public void DevelopmentTargets_ShouldStayInSyncWithPackagedTargets(string targetName, string? developmentOnlyPrefix)
@@ -124,7 +128,9 @@ public class TailwindTargetsTests
         var packagedDependsOn = packagedTarget.Attribute("DependsOnTargets")?.Value;
         var expectedDevelopmentDependsOn = developmentOnlyPrefix is null
             ? packagedDependsOn
-            : $"{developmentOnlyPrefix};{packagedDependsOn}";
+            : string.IsNullOrEmpty(packagedDependsOn)
+                ? developmentOnlyPrefix
+                : $"{developmentOnlyPrefix};{packagedDependsOn}";
 
         Assert.Equal(expectedDevelopmentDependsOn, developmentTarget.Attribute("DependsOnTargets")?.Value);
 
@@ -162,36 +168,39 @@ public class TailwindTargetsTests
             .ToArray();
 
         // Act
-        var invocation = Assert.Single(
-            LoadProject(targetsRelativePath).Descendants("TailwindCompileTask"));
+        var invocations = LoadProject(targetsRelativePath).Descendants("TailwindCompileTask").ToArray();
+        Assert.NotEmpty(invocations);
 
-        var wired = invocation
-            .Attributes()
-            .Select(attribute => attribute.Name.LocalName)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
+        foreach (var invocation in invocations)
+        {
+            var wired = invocation
+                .Attributes()
+                .Select(attribute => attribute.Name.LocalName)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
 
-        // Assert
-        var missing = expected.Except(wired, StringComparer.Ordinal).ToArray();
-        Assert.True(
-            missing.Length == 0,
-            $"{targetsRelativePath} does not pass: {string.Join(", ", missing)}. "
-            + "A task parameter with no targets attribute silently keeps its C# default in every consumer build.");
+            // Assert
+            var missing = expected.Except(wired, StringComparer.Ordinal).ToArray();
+            Assert.True(
+                missing.Length == 0,
+                $"{targetsRelativePath} does not pass: {string.Join(", ", missing)}. "
+                + "A task parameter with no targets attribute silently keeps its C# default in every consumer build.");
 
-        var unknown = wired.Except(expected, StringComparer.Ordinal).ToArray();
-        Assert.True(
-            unknown.Length == 0,
-            $"{targetsRelativePath} passes parameters the task does not declare: {string.Join(", ", unknown)}. "
-            + "MSBuild fails the build on an unknown task parameter.");
+            var unknown = wired.Except(expected, StringComparer.Ordinal).ToArray();
+            Assert.True(
+                unknown.Length == 0,
+                $"{targetsRelativePath} passes parameters the task does not declare: {string.Join(", ", unknown)}. "
+                + "MSBuild fails the build on an unknown task parameter.");
 
-        Assert.All(invocation.Attributes(), attribute => Assert.False(
-            string.IsNullOrWhiteSpace(attribute.Value),
-            $"{attribute.Name.LocalName} is wired to an empty value in {targetsRelativePath}."));
+            Assert.All(invocation.Attributes(), attribute => Assert.False(
+                string.IsNullOrWhiteSpace(attribute.Value),
+                $"{attribute.Name.LocalName} is wired to an empty value in {targetsRelativePath}."));
+        }
     }
 
     /// <summary>
-    /// Both task outputs must be captured, or the generated CSS never reaches static web assets and the
-    /// manifest never records what to clean.
+    /// Every task output must be captured: build outputs feed static web assets and Clean, while resolved
+    /// watch invocations are returned to the project-aware CLI command.
     /// </summary>
     [Theory]
     [InlineData(PackagedTargets)]
@@ -206,14 +215,53 @@ public class TailwindTargetsTests
             .OrderBy(name => name, StringComparer.Ordinal)
             .ToArray();
 
-        var captured = LoadProject(targetsRelativePath)
-            .Descendants("TailwindCompileTask")
-            .Elements("Output")
-            .Select(output => output.Attribute("TaskParameter")?.Value ?? string.Empty)
-            .OrderBy(name => name, StringComparer.Ordinal)
-            .ToArray();
+        var invocations = LoadProject(targetsRelativePath).Descendants("TailwindCompileTask").ToArray();
+        Assert.NotEmpty(invocations);
 
-        Assert.Equal(expected, captured);
+        foreach (var invocation in invocations)
+        {
+            var captured = invocation
+                .Elements("Output")
+                .Select(output => output.Attribute("TaskParameter")?.Value ?? string.Empty)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+
+            Assert.Equal(expected, captured);
+        }
+    }
+
+    [Theory]
+    [InlineData(PackagedTargets)]
+    [InlineData(MultiTargetingTargets)]
+    [InlineData(DevelopmentTargets)]
+    public void ResolveWatchConfiguration_ShouldReturnAnEmptySuccessfulResultWhenResolutionIsDisabled(
+        string targetsRelativePath)
+    {
+        var project = LoadProject(targetsRelativePath);
+        var publicTarget = Assert.Single(
+            project.Elements("Target"),
+            target => target.Attribute("Name")?.Value == "ResolveTailwindWatchConfiguration");
+        var helperTarget = Assert.Single(
+            project.Elements("Target"),
+            target => target.Attribute("Name")?.Value == "_TailwindResolveWatchConfiguration");
+        var publicDependsOn = publicTarget.Attribute("DependsOnTargets")?.Value;
+        var helperCondition = helperTarget.Attribute("Condition")?.Value;
+
+        Assert.Null(publicTarget.Attribute("Condition"));
+        Assert.NotNull(publicDependsOn);
+        Assert.NotNull(helperCondition);
+        Assert.Contains(
+            "_TailwindResolveWatchConfiguration",
+            publicDependsOn,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "'$(TailwindEnabled)' == 'true'",
+            helperCondition,
+            StringComparison.Ordinal);
+        Assert.Contains(
+            "'@(TailwindBeforeStaticWebAssets)' != ''",
+            helperCondition,
+            StringComparison.Ordinal);
     }
 
     public static TheoryData<string> EveryTargetName()

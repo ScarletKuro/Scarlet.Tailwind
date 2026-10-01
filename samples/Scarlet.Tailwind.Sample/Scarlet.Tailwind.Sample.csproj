@@ -9,11 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Re-runs Tailwind on `dotnet watch` when a source file changes. Note that this watches the files
-         Tailwind scans for class names, not just the stylesheet: adding a class to a .razor file has to
-         trigger a rebuild, or the new class never reaches the CSS. -->
-    <Watch Include="Styles\**\*.css" />
-    <Watch Include="**\*.razor" />
+    <!-- Used when dotnet watch rebuilds the project, such as with Hot Reload disabled.
+         Hot Reload still observes @(Watch) items, but observing a change does not invoke
+         TailwindCompile, so use the long-running Tailwind CLI watcher in that mode. -->
+    <Watch Include="Styles\**\*.css;**\*.razor;**\*.razor.cs;**\*.cshtml;**\*.html;wwwroot\**\*.js" />
   </ItemGroup>
 
   <!-- Import the Tailwind targets from the referenced project (development scenario) -->

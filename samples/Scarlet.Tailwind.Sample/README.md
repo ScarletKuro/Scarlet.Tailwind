@@ -22,22 +22,28 @@ Expected generated file:
 
 ## Watching
 
-`dotnet watch` already watches Razor files, but it does not know that Tailwind entry stylesheets are build
-inputs. The sample explicitly watches both:
+Blazor Hot Reload does not run arbitrary MSBuild targets, so changing a class in a `.razor` file does not
+rerun Tailwind through the build package. For Hot Reload, install the CLI as a local tool and run both
+watchers:
 
-```xml
-<ItemGroup>
-  <Watch Include="Styles\**\*.css" />
-  <Watch Include="**\*.razor" />
-</ItemGroup>
+```bash
+dotnet watch
+dotnet tailwind watch
 ```
 
-Then `dotnet watch run` rebuilds — and therefore re-runs Tailwind — whenever the stylesheet changes or a
-scanned Razor file gains or loses a class.
+Run each command in its own terminal. The Tailwind command reads this project's existing MSBuild entry
+point and settings, so paths do not have to be repeated. Blazor applies Razor changes without restarting,
+Tailwind regenerates the stylesheet, and `dotnet watch` refreshes the changed static asset in the browser.
+
+The sample's `Watch` items support the slower MSBuild-only alternative:
+
+```bash
+dotnet watch --no-hot-reload
+```
 
 Do not watch generated files under `wwwroot`; doing so makes each Tailwind compile trigger another build.
 Do not put `--watch` in `TailwindAdditionalArguments`: watch mode does not exit, so an MSBuild invocation
-would never finish. Use the `Watch` items above, or run `dotnet tailwind --watch` as a separate process.
+would never finish.
 
 See [dotnet watch Integration](../../src/Scarlet.Tailwind.MSBuild/README.md#dotnet-watch-integration) for
 the full details.

@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using System.IO.Abstractions;
+using Scarlet.Tailwind.Cli.Watch;
 using Scarlet.Tailwind.Core;
 using Scarlet.Tailwind.Core.Providers;
 
@@ -53,6 +54,19 @@ internal static class Program
             Console.Out,
             Console.Error);
 
-        return application.Run(args);
+        var log = new ConsoleTailwindLogger(Console.Error);
+        var dispatcher = new TailwindCommandDispatcher(
+            application,
+            new TailwindWatchCommand(
+                new MsBuildWatchConfigurationProvider(),
+                new WatchProcessLauncher(log),
+                new WatchSessionLockProvider(options.CacheRoot),
+                Console.Out,
+                Console.Error,
+                Directory.GetCurrentDirectory,
+                Environment.GetEnvironmentVariable),
+            options.PurePassthrough);
+
+        return dispatcher.Run(args);
     }
 }

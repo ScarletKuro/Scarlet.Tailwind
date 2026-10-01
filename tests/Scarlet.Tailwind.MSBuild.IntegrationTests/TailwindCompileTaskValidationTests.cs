@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Build.Utilities;
 using Xunit.Abstractions;
 
@@ -18,6 +19,55 @@ public class TailwindCompileTaskValidationTests
     public TailwindCompileTaskValidationTests(ITestOutputHelper output)
     {
         _output = output;
+    }
+
+    [Fact]
+    public void CompileTask_InConfigurationOnlyMode_ResolvesArgumentsWithoutStartingTailwind()
+    {
+        using var workspace = TempWorkspace.Create("resolve-watch-configuration");
+        workspace.WriteFile("Styles/app.css", "@import \"tailwindcss\";");
+
+        var platform = TailwindRuntimeResolver.GetCurrentPlatform();
+        var runtimeDirectory = Path.Combine(workspace.RootDirectory, "runtimes");
+        var executable = Path.Combine(
+            runtimeDirectory,
+            TailwindRuntimeResolver.GetRuntimeIdentifier(platform),
+            "native",
+            TailwindRuntimeResolver.GetExecutableName(platform));
+        workspace.WriteFile(Path.GetRelativePath(workspace.RootDirectory, executable), "not an executable");
+
+        var item = CreateItem();
+        item.SetMetadata("AdditionalArguments", "--custom \"value with spaces\"");
+        var task = new TailwindCompileTask
+        {
+            BuildEngine = new MockBuildEngine(_output),
+            Compilations = [item],
+            ProjectDirectory = workspace.RootDirectory,
+            RuntimeDirectory = runtimeDirectory,
+            ConfigurationOnly = true
+        };
+
+        Assert.True(task.Execute());
+
+        var invocation = Assert.Single(task.WatchInvocations);
+        var arguments = invocation.GetMetadata("ArgumentsBase64")
+            .Split(';')
+            .Select(encoded => Encoding.UTF8.GetString(Convert.FromBase64String(encoded)))
+            .ToArray();
+        var generatedPaths = invocation.GetMetadata("GeneratedPathsBase64")
+            .Split(';')
+            .Select(encoded => Encoding.UTF8.GetString(Convert.FromBase64String(encoded)))
+            .ToArray();
+
+        Assert.Equal("1", invocation.GetMetadata("ProtocolVersion"));
+        Assert.Equal(executable, invocation.GetMetadata("ExecutablePath"));
+        Assert.Equal(workspace.RootDirectory, invocation.GetMetadata("WorkingDirectory"));
+        Assert.Equal([Path.Combine(workspace.RootDirectory, "wwwroot", "css", "app.css")], generatedPaths);
+        Assert.Contains($"--input={Path.Combine(workspace.RootDirectory, "Styles", "app.css")}", arguments);
+        Assert.Contains($"--output={Path.Combine(workspace.RootDirectory, "wwwroot", "css", "app.css")}", arguments);
+        Assert.Contains("value with spaces", arguments);
+        Assert.False(File.Exists(Path.Combine(workspace.RootDirectory, "wwwroot", "css", "app.css")));
+        Assert.Empty(task.GeneratedFiles);
     }
 
     [Fact]

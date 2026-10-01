@@ -41,9 +41,11 @@
                          TailwindVersionDownload="$(TailwindVersionDownload)"
                          DownloadMutexTimeoutSeconds="$(TailwindDownloadMutexTimeoutSeconds)"
                          TimeoutMilliseconds="$(TailwindTimeoutMilliseconds)"
+                         ConfigurationOnly="false"
                          RuntimePacks="@(TailwindRuntimePack)">
       <Output TaskParameter="GeneratedFiles" ItemName="_TailwindGeneratedFiles" />
       <Output TaskParameter="RemovedFiles" ItemName="_TailwindRemovedFiles" />
+      <Output TaskParameter="WatchInvocations" ItemName="_TailwindWatchInvocations" />
     </TailwindCompileTask>
 
     <ItemGroup>
@@ -55,6 +57,38 @@
       <FileWrites Include="@(_TailwindGeneratedFiles)" />
     </ItemGroup>
   </Target>
+
+  <Target Name="_TailwindResolveWatchConfiguration"
+          Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
+    <TailwindCompileTask Compilations="@(TailwindBeforeStaticWebAssets)"
+                         ProjectDirectory="$(MSBuildProjectDirectory)"
+                         Configuration="$(Configuration)"
+                         Minify="$(TailwindMinify)"
+                         Optimize="$(TailwindOptimize)"
+                         Map="$(TailwindMap)"
+                         Silent="$(TailwindSilent)"
+                         Cwd="$(TailwindCwd)"
+                         AdditionalArguments="$(TailwindAdditionalArguments)"
+                         ManifestDirectory="$(TailwindManifestDirectory)"
+                         RuntimeDirectory="$(TailwindRuntimeDirectory)"
+                         TailwindRuntimeDownload="$(TailwindRuntimeDownload)"
+                         TailwindVersionDownload="$(TailwindVersionDownload)"
+                         DownloadMutexTimeoutSeconds="$(TailwindDownloadMutexTimeoutSeconds)"
+                         TimeoutMilliseconds="$(TailwindTimeoutMilliseconds)"
+                         ConfigurationOnly="true"
+                         RuntimePacks="@(TailwindRuntimePack)">
+      <Output TaskParameter="GeneratedFiles" ItemName="_TailwindWatchGeneratedFiles" />
+      <Output TaskParameter="RemovedFiles" ItemName="_TailwindWatchRemovedFiles" />
+      <Output TaskParameter="WatchInvocations" ItemName="_TailwindWatchInvocations" />
+    </TailwindCompileTask>
+  </Target>
+
+  <!-- Explicitly queried by `dotnet tailwind watch`. Keeping the public target unconditional means a
+       disabled or unconfigured project succeeds with an empty result instead of returning MSBuild's
+       "Skipped" result. The conditional helper above does the real resolution without compiling. -->
+  <Target Name="ResolveTailwindWatchConfiguration"
+          DependsOnTargets="_TailwindResolveWatchConfiguration"
+          Returns="@(_TailwindWatchInvocations)" />
 
   <!-- Hooked to both targets deliberately. In a single-target-framework project CoreClean runs with
        $(IntermediateOutputPath) set to obj/<config>/<tfm>/, which is where the build wrote the manifest. In
