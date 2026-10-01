@@ -20,7 +20,7 @@ internal sealed class MsBuildWatchConfigurationProvider : ITailwindWatchConfigur
         string currentDirectory)
     {
         var projectPath = ResolveProjectPath(project, currentDirectory);
-        var dotnetPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") ?? "dotnet";
+        var dotnetPath = ResolveDotnetPath();
         var startInfo = new ProcessStartInfo(dotnetPath)
         {
             UseShellExecute = false,
@@ -36,7 +36,6 @@ internal sealed class MsBuildWatchConfigurationProvider : ITailwindWatchConfigur
         startInfo.ArgumentList.Add("-verbosity:quiet");
         startInfo.ArgumentList.Add($"-getTargetResult:{TargetName}");
         startInfo.ArgumentList.Add($"-property:Configuration={configuration}");
-
         using var process = Process.Start(startInfo)
             ?? throw new TailwindWatchException("could not start dotnet msbuild.", ExitCodes.TailwindNotExecutable);
 
@@ -53,7 +52,7 @@ internal sealed class MsBuildWatchConfigurationProvider : ITailwindWatchConfigur
                 ? $"MSBuild exited with code {process.ExitCode}."
                 : error;
             throw new TailwindWatchException(
-                $"could not read Tailwind configuration from '{projectPath}'. {detail}");
+                $"could not read Tailwind configuration from '{projectPath}'. {detail}{DescribeMissingTarget(error)}");
         }
 
         return ParseTargetResult(output, projectPath);
@@ -121,6 +120,43 @@ internal sealed class MsBuildWatchConfigurationProvider : ITailwindWatchConfigur
             throw new TailwindWatchException(
                 $"MSBuild returned an invalid Tailwind watch configuration for '{projectPath}': {exception.Message}");
         }
+    }
+
+    /// <summary>
+    /// Explains the one MSBuild failure that is about this command rather than the project: the target does
+    /// not exist because the package is not referenced, not restored, or predates the watch command.
+    /// </summary>
+    internal static string DescribeMissingTarget(string error)
+    {
+        return error.Contains("MSB4057", StringComparison.Ordinal)
+            && error.Contains(TargetName, StringComparison.Ordinal)
+            ? Environment.NewLine
+              + "dotnet tailwind watch requires the project to reference a Scarlet.Tailwind.MSBuild version that "
+              + "provides this target, and to have been restored (run 'dotnet restore')."
+            : string.Empty;
+    }
+
+    private static string ResolveDotnetPath()
+    {
+        var hostPath = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH");
+        if (!string.IsNullOrWhiteSpace(hostPath))
+        {
+            return hostPath;
+        }
+
+        // A local tool runs under the dotnet muxer, so this is the exact host that launched us even when it is
+        // not on PATH. A global tool runs through its apphost shim instead, which must not be mistaken for it.
+        var processPath = Environment.ProcessPath;
+        if (processPath is not null
+            && string.Equals(
+                Path.GetFileNameWithoutExtension(processPath),
+                "dotnet",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return processPath;
+        }
+
+        return "dotnet";
     }
 
     private static string ResolveProjectPath(string? project, string currentDirectory)

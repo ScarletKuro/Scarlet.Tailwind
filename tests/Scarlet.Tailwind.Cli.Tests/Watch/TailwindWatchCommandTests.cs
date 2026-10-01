@@ -212,6 +212,112 @@ public class TailwindWatchCommandTests
         Assert.Contains("already running", stderr.ToString());
     }
 
+    /// <summary>
+    /// The watcher must resolve exactly what the build resolves. A property override would let it write the
+    /// same output file with different settings than the build that dotnet watch runs alongside it.
+    /// </summary>
+    [Theory]
+    [InlineData("-p:TailwindMinify=false")]
+    [InlineData("--property:TailwindMinify=false")]
+    [InlineData("--property")]
+    public void Run_WithAnMsBuildPropertyOverride_ShouldReturnAUsageError(string option)
+    {
+        var provider = new RecordingConfigurationProvider();
+        var stderr = new StringWriter();
+        var command = CreateCommand(provider, new RecordingWatchLauncher(), stderr);
+
+        var result = command.Run([option]);
+
+        Assert.Equal(ExitCodes.UsageError, result);
+        Assert.Null(provider.Configuration);
+        Assert.Contains("unrecognised watch option", stderr.ToString());
+    }
+
+    [Theory]
+    [InlineData("--poll", "--poll")]
+    [InlineData("--poll=250", "--poll=250")]
+    public void Run_WithPoll_ShouldAppendItAfterTheWatchFlag(string option, string expected)
+    {
+        var launcher = new RecordingWatchLauncher();
+        var command = CreateCommand(new RecordingConfigurationProvider(), launcher);
+
+        var result = command.Run([option]);
+
+        Assert.Equal(ExitCodes.Success, result);
+        var invocation = Assert.Single(launcher.Invocations!);
+        Assert.Equal(["--input=/repo/Styles/app.css", "--watch=always", expected], invocation.Request.Arguments);
+    }
+
+    [Theory]
+    [InlineData("--poll=")]
+    [InlineData("--poll=0")]
+    [InlineData("--poll=-5")]
+    [InlineData("--poll=fast")]
+    public void Run_WithAnInvalidPollInterval_ShouldReturnAUsageError(string option)
+    {
+        var provider = new RecordingConfigurationProvider();
+        var command = CreateCommand(provider, new RecordingWatchLauncher());
+
+        var result = command.Run([option]);
+
+        Assert.Equal(ExitCodes.UsageError, result);
+        Assert.Null(provider.Configuration);
+    }
+
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("true", true)]
+    [InlineData("TRUE", true)]
+    [InlineData("0", false)]
+    [InlineData("false", false)]
+    [InlineData(null, false)]
+    public void Run_ShouldPollWhenTheDotnetPollingVariableIsSet(string? value, bool expectPoll)
+    {
+        var launcher = new RecordingWatchLauncher();
+        var command = CreateCommand(
+            new RecordingConfigurationProvider(),
+            launcher,
+            getEnvironmentVariable: name => name == TailwindWatchCommand.PollingFileWatcherVariable ? value : null);
+
+        var result = command.Run([]);
+
+        Assert.Equal(ExitCodes.Success, result);
+        var invocation = Assert.Single(launcher.Invocations!);
+        Assert.Equal(expectPoll, invocation.Request.Arguments.Contains("--poll"));
+    }
+
+    [Fact]
+    public void Run_WithAnExplicitPollInterval_ShouldOverrideThePollingVariable()
+    {
+        var launcher = new RecordingWatchLauncher();
+        var command = CreateCommand(
+            new RecordingConfigurationProvider(),
+            launcher,
+            getEnvironmentVariable: _ => "1");
+
+        command.Run(["--poll=500"]);
+
+        var invocation = Assert.Single(launcher.Invocations!);
+        Assert.Equal("--poll=500", invocation.Request.Arguments[^1]);
+        Assert.DoesNotContain("--poll", invocation.Request.Arguments);
+    }
+
+    private static TailwindWatchCommand CreateCommand(
+        ITailwindWatchConfigurationProvider provider,
+        IWatchProcessLauncher launcher,
+        TextWriter? stderr = null,
+        Func<string, string?>? getEnvironmentVariable = null)
+    {
+        return new TailwindWatchCommand(
+            provider,
+            launcher,
+            new RecordingSessionLockProvider(),
+            new StringWriter(),
+            stderr ?? new StringWriter(),
+            () => "/repo",
+            getEnvironmentVariable);
+    }
+
     private sealed class RecordingConfigurationProvider : ITailwindWatchConfigurationProvider
     {
         public IReadOnlyList<TailwindWatchInvocation> Invocations { get; set; } =

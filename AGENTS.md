@@ -159,6 +159,24 @@ tool already needs a .NET install.
 **The embedded binary must be chmod'd at run time.** NuGet packages carry no Unix permission bits, so it is
 extracted `0644` and fails with `EACCES` on first use on Linux and macOS.
 
+**`dotnet tailwind watch` is a contract between two separately shipped packages.** The CLI runs
+`dotnet msbuild -getTargetResult:ResolveTailwindWatchConfiguration` and reads the item metadata that
+`TailwindCompileTask` emits in `ConfigurationOnly` mode. Any CLI version may meet any MSBuild package version
+in a consumer repository, so:
+
+- Adding metadata is compatible only if the CLI treats it as optional and falls back to the old behaviour,
+  as `WorkingDirectory` and `GeneratedPathsBase64` already do.
+- Renaming, removing or changing the meaning of metadata requires bumping `ProtocolVersion` on both sides.
+  The CLI rejects versions it does not know rather than guessing.
+- Arguments and paths are base64 encoded individually and joined with `;`. MSBuild metadata cannot carry an
+  argument vector losslessly any other way.
+- `ResolveTailwindWatchConfiguration` must stay unconditional. A conditional target that is skipped returns
+  `Skipped` rather than an empty `Success`, which the CLI reports as a failure.
+
+**The watcher appends `--watch=always`, and `--poll` when asked.** Both are rejected in
+`TailwindAdditionalArguments`, so the CLI is the only place they can come from. `always` matters: plain
+`--watch` exits when stdin closes, which happens in CI and under some terminals.
+
 ## Common failure modes
 
 | Symptom | Cause |
@@ -169,6 +187,8 @@ extracted `0644` and fails with `EACCES` on first use on Linux and macOS.
 | CSS contains classes that were deleted | The scanner is reading `obj`. See *Writing your entry stylesheet* in the MSBuild README |
 | A build hangs indefinitely | `--watch` reached Tailwind through `TailwindAdditionalArguments` |
 | e2e script fails on Linux with a bad interpreter | CRLF line endings. `.gitattributes` forces `*.sh` to LF |
+| `dotnet tailwind watch` fails with `MSB4057` | The project does not reference `Scarlet.Tailwind.MSBuild`, references a version without the watch target, or was never restored |
+| `dotnet tailwind watch` sees no changes in a container or on WSL | File-system events do not cross that boundary. Use `--poll` or set `DOTNET_USE_POLLING_FILE_WATCHER=1` |
 | A `grep` against build output never matches | The build ran at `minimal` verbosity, which drops `High`-importance messages. Pass `--verbosity normal` |
 
 ## Before you claim it works

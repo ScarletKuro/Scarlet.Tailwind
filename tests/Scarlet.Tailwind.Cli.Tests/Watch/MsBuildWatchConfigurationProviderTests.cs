@@ -134,4 +134,24 @@ public class MsBuildWatchConfigurationProviderTests
         Assert.Equal(Path.GetDirectoryName(projectPath), invocation.WorkingDirectory);
         Assert.Equal(["wwwroot/css/app.css"], invocation.GeneratedPaths);
     }
+
+    [Fact]
+    public void DescribeMissingTarget_WhenTheWatchTargetDoesNotExist_ShouldExplainWhatTheProjectNeeds()
+    {
+        const string error =
+            "App.csproj : error MSB4057: The target \"ResolveTailwindWatchConfiguration\" does not exist in the project.";
+
+        var hint = MsBuildWatchConfigurationProvider.DescribeMissingTarget(error);
+
+        Assert.Contains("Scarlet.Tailwind.MSBuild", hint);
+        Assert.Contains("dotnet restore", hint);
+    }
+
+    [Theory]
+    [InlineData("App.csproj : error CS1002: ; expected")]
+    [InlineData("App.csproj : error MSB4057: The target \"Publish\" does not exist in the project.")]
+    public void DescribeMissingTarget_ForAnyOtherError_ShouldAddNothing(string error)
+    {
+        Assert.Equal(string.Empty, MsBuildWatchConfigurationProvider.DescribeMissingTarget(error));
+    }
 }

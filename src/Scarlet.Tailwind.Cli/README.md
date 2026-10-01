@@ -153,7 +153,21 @@ entry points, paths, runtime and Debug/Release defaults:
 dotnet tailwind watch
 dotnet tailwind watch --project src/MyApp/MyApp.csproj
 dotnet tailwind watch --configuration Release
+dotnet tailwind watch --poll
 ```
+
+There is deliberately no way to override MSBuild properties here. The watcher shares its output files with
+the build that `dotnet watch` runs, so different settings would make the two overwrite each other with
+different CSS. Change the project instead, and both pick it up.
+
+`--poll[=ms]` makes Tailwind poll instead of relying on file-system events, which is what you want in
+containers, WSL-mounted drives and network shares. It is implied when `DOTNET_USE_POLLING_FILE_WATCHER` is
+`1` or `true`, the same switch `dotnet watch` honours. It lives here because `--poll`, like `--watch`, is
+rejected in `TailwindAdditionalArguments`. Unlike a property override, it changes how Tailwind notices
+changes, not what it writes.
+
+The project must reference a `Scarlet.Tailwind.MSBuild` version that provides the watch target and must
+have been restored. If either is missing, the command says so instead of reporting a bare MSBuild error.
 
 These two forms solve different problems:
 

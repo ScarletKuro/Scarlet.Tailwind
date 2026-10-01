@@ -279,11 +279,18 @@ if ! wait_for_file_text "$TAILWIND_WATCH_LOG" "Scarlet.Tailwind: watching 1 Tail
 fi
 echo "✓ CLI discovered the MSBuild-configured entry point"
 
-if ! wait_for_file_text "$PROJECT_DIR/wwwroot/css/app.css" ".text-3xl"; then
+# The stylesheet itself already exists from the initial build, so it cannot prove the watcher compiled.
+# Tailwind's own "Done in" line, written to this watcher's log, can.
+if ! wait_for_file_text "$TAILWIND_WATCH_LOG" "Done in"; then
     cat "$TAILWIND_WATCH_LOG"
-    fatal "Tailwind watcher did not produce the initial stylesheet"
+    fatal "Tailwind watcher did not complete its initial compile"
 fi
-echo "✓ Project-aware Tailwind watcher produced the initial stylesheet"
+echo "✓ Project-aware Tailwind watcher completed its initial compile"
+
+if ! grep -Fq ".text-3xl" "$PROJECT_DIR/wwwroot/css/app.css"; then
+    fatal "The initial stylesheet is missing a utility used by the page"
+fi
+echo "✓ Initial stylesheet contains the utility used by the page"
 
 if grep -Fq ".tracking-widest" "$PROJECT_DIR/wwwroot/css/app.css"; then
     echo "✗ Initial stylesheet already contains the not-yet-used utility"

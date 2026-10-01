@@ -77,7 +77,7 @@ internal sealed class ProcessSignalBridge : IDisposable
 
         foreach (var (process, sharesProcessGroup) in _processes)
         {
-            if (!sharesProcessGroup)
+            if (!sharesProcessGroup && IsRunning(process))
             {
                 PosixInterop.Send(process.Id, PosixInterop.SIGINT);
             }
@@ -97,7 +97,24 @@ internal sealed class ProcessSignalBridge : IDisposable
 
         foreach (var (process, _) in _processes)
         {
-            PosixInterop.Send(process.Id, signal);
+            if (IsRunning(process))
+            {
+                PosixInterop.Send(process.Id, signal);
+            }
+        }
+    }
+
+    // Once a child has been reaped its id can be reused by an unrelated process, so a session with several
+    // watchers must not signal the ones that already exited.
+    private static bool IsRunning(Process process)
+    {
+        try
+        {
+            return !process.HasExited;
+        }
+        catch (Exception)
+        {
+            return false;
         }
     }
 }

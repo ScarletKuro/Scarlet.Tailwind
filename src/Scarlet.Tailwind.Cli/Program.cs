@@ -63,7 +63,8 @@ internal static class Program
                 new WatchSessionLockProvider(options.CacheRoot),
                 Console.Out,
                 Console.Error,
-                Directory.GetCurrentDirectory),
+                Directory.GetCurrentDirectory,
+                Environment.GetEnvironmentVariable),
             options.PurePassthrough);
 
         return dispatcher.Run(args);

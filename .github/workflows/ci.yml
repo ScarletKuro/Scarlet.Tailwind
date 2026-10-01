@@ -398,7 +398,7 @@ jobs:
         run: |
           chmod +x tests/e2e/cli-tool/verify.sh
           tests/e2e/cli-tool/verify.sh "$GITHUB_WORKSPACE" "${{ env.VERSION }}" "${{ env.TAILWIND_VERSION }}" "${{ env.CLI_VERSION }}"
-          
+
       - name: E2E Test - Tailwind Watch with Blazor Hot Reload
         shell: bash
         timeout-minutes: 5

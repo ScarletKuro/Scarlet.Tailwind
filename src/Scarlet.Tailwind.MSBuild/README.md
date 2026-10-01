@@ -446,6 +446,10 @@ watcher from an MSBuild target. Tailwind watches everything it scans, including 
 files. When it rewrites `wwwroot/css/app.css`, `dotnet watch` handles the stylesheet as a static asset and
 refreshes the browser while the Blazor process stays alive.
 
+Because `--poll` is rejected in `TailwindAdditionalArguments` along with `--watch`, pass it to the watcher
+instead (`dotnet tailwind watch --poll`) when file-system events do not reach the project, such as in a
+container. It is implied when `DOTNET_USE_POLLING_FILE_WATCHER` is set, as it often already is there.
+
 This is different from raw CLI passthrough:
 
 ```bash
