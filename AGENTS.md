@@ -48,6 +48,11 @@ The facts this package depends on, all verified against 4.3.3:
 - **The scanner's built-in ignore list has no `bin` or `obj`.** Every entry is from the JavaScript or Python
   ecosystem. In a .NET project `.gitignore` usually covers it; when it does not, `obj` feeds the scanner
   last build's generated Razor sources and deleted classes never leave the CSS.
+- **`@source` paths are relative to the stylesheet, independently of `--cwd`.** For `Styles/app.css`,
+  exclude the project's build directories with `../bin` and `../obj`.
+- **External `.css.map` files are scanner inputs.** Their embedded `sourcesContent` can add unused rules
+  and theme variables on the next build. Exclude generated maps, for example with
+  `@source not "../wwwroot/css/*.map"` in `Styles/app.css`.
 
 Check any new claim against the binary rather than the docs. `src/Scarlet.Tailwind.Runtime.*/tailwindcss` is
 right there after a build.

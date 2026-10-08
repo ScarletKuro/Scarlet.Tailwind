@@ -329,8 +329,9 @@ public class TailwindBeforeStaticWebAssetsTests
             """
             @import "tailwindcss";
 
-            @source not "./bin";
-            @source not "./obj";
+            @source not "../bin";
+            @source not "../obj";
+            @source not "../wwwroot/css/*.map";
             """);
 
         workspace.WriteFile(

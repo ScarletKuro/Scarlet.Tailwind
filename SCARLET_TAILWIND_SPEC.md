@@ -550,14 +550,25 @@ content files, so the same markup is scanned twice.
 
 The spec's position: `Scarlet.Tailwind` must not paper over this by rewriting the user's stylesheet, but it
 must not leave users to discover it either. Both samples and the README should show the exclusion
-explicitly, as the recommended starting point for a .NET project:
+explicitly, as the recommended starting point for a .NET project with an entry at `Styles/app.css`:
 
 ```css
 @import "tailwindcss";
 
-@source not "./bin";
-@source not "./obj";
+@source not "../bin";
+@source not "../obj";
+@source not "../wwwroot/css/*.map";
 ```
+
+`@source` paths are relative to the stylesheet, independently of `--cwd`. The `../` prefixes above reach
+the project root from `Styles/`. For an entry at the project root, use `./` instead.
+
+External source maps also need exclusion when they live inside the scan root. Tailwind ignores CSS files,
+but scans `.css.map` files, whose `sourcesContent` embeds the original theme and preflight stylesheets.
+Without the map exclusion, a second build emits extra utilities and variables from the first build's map.
+Cleaning deletes the map and temporarily hides the problem. Keep this exclusion in the README, samples and
+test fixtures rather than rewriting user stylesheets in the task. Inline maps are inside CSS and are already
+ignored.
 
 For projects that would rather enumerate sources than exclude them, `source(none)` turns off detection
 entirely and the v3 `content` array translates directly. Brace expansion is supported in source patterns —
@@ -565,7 +576,7 @@ Tailwind's own glob tests cover `a-{b,c}-d-{e,f}-g/*.html` — so the v3 example
 
 ```css
 @import "tailwindcss" source(none);
-@source "./**/*.{cshtml,razor}";
+@source "../**/*.{cshtml,razor}";
 ```
 
 This is stricter and faster, at the cost of silently missing classes that appear in a file type nobody

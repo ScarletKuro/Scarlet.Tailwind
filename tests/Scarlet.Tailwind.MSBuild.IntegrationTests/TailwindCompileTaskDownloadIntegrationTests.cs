@@ -135,7 +135,7 @@ public class TailwindCompileTaskDownloadIntegrationTests
     {
         var workspace = TempWorkspace.Create(name);
 
-        workspace.WriteFile("Styles/app.css", "@import \"tailwindcss\";\n\n@source not \"./bin\";\n@source not \"./obj\";");
+        workspace.WriteFile("Styles/app.css", "@import \"tailwindcss\";\n\n@source not \"../bin\";\n@source not \"../obj\";\n@source not \"../wwwroot/css/*.map\";");
         workspace.WriteFile("Pages/Index.cshtml", "<h1 class=\"text-3xl font-bold\">Hello</h1>");
 
         return workspace;

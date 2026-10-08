@@ -22,8 +22,9 @@ public class TailwindCompileTaskIntegrationTests
         """
         @import "tailwindcss";
 
-        @source not "./bin";
-        @source not "./obj";
+        @source not "../bin";
+        @source not "../obj";
+        @source not "../wwwroot/css/*.map";
         """;
 
     private readonly ITestOutputHelper _output;
@@ -130,6 +131,39 @@ public class TailwindCompileTaskIntegrationTests
         Assert.Equal(
             [cssPath, mapPath],
             task.GeneratedFiles.Select(static file => file.ItemSpec));
+    }
+
+    [Fact]
+    public void CompileTask_WithExternalMapsExcluded_RepeatedCompilationsProduceIdenticalCss()
+    {
+        using var workspace = CreateWorkspace("compile-external-map-repeat");
+        var item = CreateItem();
+        item.SetMetadata("Map", "wwwroot/css/app.css.map");
+        var cssPath = workspace.PathTo("wwwroot", "css", "app.css");
+
+        Assert.True(CreateTask(workspace, item).Execute());
+        Assert.True(File.Exists(cssPath + ".map"));
+        var firstCss = File.ReadAllBytes(cssPath);
+
+        // The first build creates a map containing Tailwind's theme and preflight sources. Without the
+        // stylesheet's map exclusion, the next build scans them and emits unused rules and variables.
+        Assert.True(CreateTask(workspace, item).Execute());
+        Assert.Equal(firstCss, File.ReadAllBytes(cssPath));
+    }
+
+    [Fact]
+    public void CompileTask_WithBuildDirectoriesExcluded_ResolvesSourcesRelativeToTheStylesheet()
+    {
+        using var workspace = CreateWorkspace("compile-build-directory-exclusions");
+        workspace.WriteFile("bin/Stale.html", "<div class=\"bg-lime-300\"></div>");
+        workspace.WriteFile("obj/Stale.g.cs", "// bg-pink-400");
+
+        Assert.True(CreateTask(workspace).Execute());
+        var css = File.ReadAllText(workspace.PathTo("wwwroot", "css", "app.css"));
+
+        Assert.Contains(".text-3xl", css);
+        Assert.DoesNotContain(".bg-lime-300", css);
+        Assert.DoesNotContain(".bg-pink-400", css);
     }
 
     [Fact]

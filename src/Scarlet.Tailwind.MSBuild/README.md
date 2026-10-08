@@ -238,13 +238,14 @@ triple. Tailwind v4 finds your classes by scanning, automatically.
 
 ### Exclude `bin` and `obj`
 
-This is the recommended starting point for a .NET project:
+This is the recommended starting point for a .NET project with its entry stylesheet at `Styles/app.css`:
 
 ```css
 @import "tailwindcss";
 
-@source not "./bin";
-@source not "./obj";
+@source not "../bin";
+@source not "../obj";
+@source not "../wwwroot/css/*.map";
 ```
 
 Tailwind's built-in ignore list covers `node_modules`, `.git`, `.venv` and friends — **every entry is from
@@ -255,12 +256,26 @@ the class names from *previous* builds. A class you deleted from a `.razor` file
 present in yesterday's generated source, so Tailwind keeps emitting CSS for it. The only symptom is a
 stylesheet that will not shrink, and nothing points at the scanner.
 
+Paths in `@source` directives resolve relative to the entry stylesheet, so `../obj` in `Styles/app.css`
+excludes the project's `obj` directory. For a stylesheet at the project root, use `./obj` instead.
+
+### Exclude External Source Maps
+
+Tailwind ignores CSS files during automatic detection, but it scans external `.css.map` files. Those maps
+embed the original stylesheets in `sourcesContent`, including Tailwind's theme and preflight. If a generated
+map is inside the scan root, the next build reads it and emits extra utilities and theme variables even when
+no application source changed. Cleaning deletes the map, so the first build after clean has different CSS
+from subsequent builds.
+
+The map exclusion above prevents this for outputs under `wwwroot/css`. Adjust it if your external maps go
+elsewhere. Inline maps remain inside CSS files and do not need a separate exclusion.
+
 ### What `.gitignore` Already Does for You
 
 The scanner honours `.gitignore` even when there is no `.git` directory, so the standard dotnet `.gitignore`
-— which excludes `bin/` and `obj/` — already covers most projects. The two lines above are insurance for the
-cases it does not: a project with no `.gitignore`, one whose ignore rules do not cover these directories, or
-a source tree consumed from somewhere the ignore file does not apply.
+— which excludes `bin/` and `obj/` — already covers most projects. The `bin` and `obj` exclusions above are
+insurance for the cases it does not: a project with no `.gitignore`, one whose ignore rules do not cover
+these directories, or a source tree consumed from somewhere the ignore file does not apply.
 
 They cost nothing when `.gitignore` has already done the job.
 
@@ -270,7 +285,7 @@ If you would rather enumerate sources than exclude them, `source(none)` turns of
 
 ```css
 @import "tailwindcss" source(none);
-@source "./**/*.{cshtml,razor}";
+@source "../**/*.{cshtml,razor}";
 ```
 
 Brace expansion works, so a v3 `content: ["./**/*.{cshtml,razor}"]` maps one to one. This is stricter and
@@ -281,7 +296,7 @@ builds a class string, say. Prefer exclusion as the default and treat `source(no
 
 ```css
 @import "tailwindcss";
-@source "../SharedComponents";
+@source "../../SharedComponents";
 ```
 
 Or move the base entirely, which is useful in a monorepo:
@@ -314,8 +329,12 @@ A legacy `tailwind.config.js` is **no longer auto-detected**. Load it explicitly
 
 `Scarlet.Tailwind` always passes `--cwd`, defaulting to `$(MSBuildProjectDirectory)`. Without it, the scan
 root would be wherever the build happened to be invoked from, and `dotnet build` in the project folder would
-produce different CSS from `dotnet build src/App`. Relative `@source` paths are therefore always relative to
-your project directory. Change it with [`TailwindCwd`](#properties) if you need to.
+produce different CSS from `dotnet build src/App`. Change this automatic scan root with
+[`TailwindCwd`](#properties) if you need to.
+
+Relative `@source` paths and the path in `source("...")` resolve relative to the stylesheet containing the
+directive. `--cwd` does not change that base. For `Styles/app.css`, use `../obj` to exclude the project's
+`obj` directory and `../../SharedComponents` to scan a sibling project.
 
 ## Properties
 
