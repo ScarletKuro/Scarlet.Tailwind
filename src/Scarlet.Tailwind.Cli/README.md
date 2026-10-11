@@ -187,7 +187,7 @@ duplicating any input or output paths on the command line.
 The command stays in the foreground and owns every native Tailwind process it starts. Closing its terminal
 or pressing Ctrl+C ends the whole watch session. Concurrent project-aware commands that resolve to any of
 the same generated paths are deduplicated with lifetime locks in Scarlet's cache; the operating system
-releases the locks if the owner exits or crashes. This prevents repeated Visual Studio and dotnet-watch
+releases the locks if the owner exits or crashes. This prevents repeated dotnet-watch
 project evaluations from creating duplicate native watchers. Each native process also runs from the project
 directory, exactly like the MSBuild task.
 

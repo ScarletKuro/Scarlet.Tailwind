@@ -309,10 +309,9 @@ public class TailwindTargetsTests
         Assert.NotNull(condition);
         Assert.Contains("_TailwindStartWatch", customTargets.Value, StringComparison.Ordinal);
         Assert.Contains("'$(TailwindWatch)' == 'true'", condition, StringComparison.Ordinal);
-        Assert.Contains("'$(BuildingInsideVisualStudio)' == 'true'", condition, StringComparison.Ordinal);
-        Assert.Contains("'$(DotNetWatchBuild)' == 'true'", condition, StringComparison.Ordinal);
-        Assert.Contains("'$(DesignTimeBuild)' != 'true' OR '$(DotNetWatchBuild)' == 'true'", condition, StringComparison.Ordinal);
-        Assert.Equal("RunTailwindBeforeStaticWebAssets", launchTarget.Attribute("AfterTargets")?.Value);
+        Assert.Contains("'$(DotNetWatchBuild)' == 'true' AND '$(DesignTimeBuild)' == 'true'", condition, StringComparison.Ordinal);
+        Assert.DoesNotContain("BuildingInsideVisualStudio", condition, StringComparison.Ordinal);
+        Assert.Null(launchTarget.Attribute("AfterTargets"));
         Assert.Single(launchTarget.Elements("TailwindStartWatchTask"));
     }
 

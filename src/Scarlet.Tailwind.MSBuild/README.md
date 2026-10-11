@@ -341,7 +341,7 @@ directive. `--cwd` does not change that base. For `Styles/app.css`, use `../obj`
 | Property | Default | Meaning |
 |---|---|---|
 | `TailwindEnabled` | `true` | Set to `false` to skip Tailwind entirely |
-| `TailwindWatch` | `false` | When explicitly enabled, start `dotnet tailwind watch` during Visual Studio builds or `dotnet watch` startup |
+| `TailwindWatch` | `false` | When explicitly enabled, start `dotnet tailwind watch` during `dotnet watch` startup |
 | `TailwindMinify` | `Auto` | `Auto`, `true`, `false`. Renders `--minify` |
 | `TailwindOptimize` | `false` | Renders `--optimize`. Ignored when minifying |
 | `TailwindMap` | `Auto` | `Auto`, `true`, `false`, or a path. `true` inlines, a path writes an external map |
@@ -460,8 +460,8 @@ produces the initial CSS as usual:
 </PropertyGroup>
 ```
 
-`TailwindWatch` is never inferred from Visual Studio or `dotnet watch`; it must be set explicitly. Once it
-is true, Scarlet starts the watcher only when `BuildingInsideVisualStudio` or `DotNetWatchBuild` is true.
+`TailwindWatch` must be set explicitly. Once it is true, Scarlet starts the watcher only when both
+`DotNetWatchBuild` and `DesignTimeBuild` are true. Visual Studio builds do not launch the watcher.
 Current `dotnet watch` versions run targets listed in `CustomCollectWatchItems` during project evaluation
 even with Hot Reload enabled, which is how Scarlet detects that mode without relying on an environment
 variable.
@@ -470,7 +470,7 @@ Install [`Scarlet.Tailwind.Cli`](https://www.nuget.org/packages/Scarlet.Tailwind
 tool first. Scarlet verifies that the command exists, starts it with shell execution, and lets it own the
 native Tailwind processes independently of MSBuild. On Windows this gives the watcher its own console
 window; close that window when you want the watcher to stop. The CLI holds lifetime locks for the resolved
-generated paths, so repeated Visual Studio or dotnet-watch evaluations do not create duplicate watchers.
+generated paths, so repeated dotnet-watch evaluations do not create duplicate watchers.
 Because `SCARLET_TAILWIND_PASSTHROUGH=1` disables the CLI's project-aware `watch` command, it cannot be
 combined with `TailwindWatch=true`; the launch target reports that conflict instead of starting raw
 Tailwind with the wrong arguments.

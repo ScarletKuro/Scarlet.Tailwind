@@ -100,11 +100,10 @@
           Returns="@(_TailwindWatchInvocations)" />
 
   <!-- TailwindWatch is deliberately opt-in. The ordinary build above still produces the initial CSS;
-       this target only starts the independently owned CLI watcher for Visual Studio or dotnet watch.
-       dotnet watch reaches it through CustomCollectWatchItems even when Hot Reload is enabled. -->
+       dotnet watch starts the independently owned CLI watcher through CustomCollectWatchItems during
+       design-time evaluation, including when Hot Reload is enabled. -->
   <Target Name="_TailwindStartWatch"
-          AfterTargets="RunTailwindBeforeStaticWebAssets"
-          Condition="'$(TailwindEnabled)' == 'true' AND '$(TailwindWatch)' == 'true' AND ('$(BuildingInsideVisualStudio)' == 'true' OR '$(DotNetWatchBuild)' == 'true') AND ('$(DesignTimeBuild)' != 'true' OR '$(DotNetWatchBuild)' == 'true') AND '@(TailwindBeforeStaticWebAssets)' != '' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
+          Condition="'$(TailwindEnabled)' == 'true' AND '$(TailwindWatch)' == 'true' AND '$(DotNetWatchBuild)' == 'true' AND '$(DesignTimeBuild)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
     <TailwindStartWatchTask ProjectPath="$(MSBuildProjectFullPath)"
                             Configuration="$(Configuration)" />
   </Target>

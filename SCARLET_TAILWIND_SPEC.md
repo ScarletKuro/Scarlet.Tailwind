@@ -397,7 +397,7 @@ question when both are set, and would diverge from the item contract both siblin
 | Property | Default | Meaning |
 | --- | --- | --- |
 | `TailwindEnabled` | `true` | Enables `RunTailwindBeforeStaticWebAssets` |
-| `TailwindWatch` | `false` | Explicitly opts into launching `dotnet tailwind watch` from Visual Studio or `dotnet watch` startup |
+| `TailwindWatch` | `false` | Explicitly opts into launching `dotnet tailwind watch` during `dotnet watch` startup |
 | `TailwindMinify` | `Auto` | `Auto`, `true`, or `false`. Renders `--minify` |
 | `TailwindOptimize` | `false` | Renders `--optimize`. Ignored when minifying |
 | `TailwindMap` | `Auto` | `Auto`, `true`, `false`, or a path. `true` inlines the map, a path writes it there |
@@ -1059,7 +1059,7 @@ The supported Hot Reload loop has `dotnet watch` own the app and browser refresh
 watch` queries the MSBuild project for its evaluated entry points and settings, then owns the native
 Tailwind watchers that regenerate CSS. Users can run those as two explicit foreground processes. As an
 opt-in convenience, `TailwindWatch=true` also lets the MSBuild package shell-launch the same CLI command
-at startup when `BuildingInsideVisualStudio` or `DotNetWatchBuild` is true. It is never enabled implicitly.
+at startup when both `DotNetWatchBuild` and `DesignTimeBuild` are true. It is never enabled implicitly.
 `CustomCollectWatchItems` is the dotnet-watch detection point, including its Hot Reload evaluation path;
 no environment-variable heuristic is needed.
 
