@@ -19,6 +19,7 @@ public class TailwindTargetsTests
         new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["TailwindEnabled"] = "true",
+            ["TailwindWatch"] = "false",
             ["TailwindMinify"] = "Auto",
             ["TailwindOptimize"] = "false",
             ["TailwindMap"] = "Auto",
@@ -37,6 +38,7 @@ public class TailwindTargetsTests
     [
         "_TailwindResolveManifestDirectory",
         "_TailwindResolveWatchConfiguration",
+        "_TailwindStartWatch",
         "ResolveTailwindWatchConfiguration",
         "RunTailwindBeforeStaticWebAssets",
         "TailwindClean"
@@ -116,6 +118,7 @@ public class TailwindTargetsTests
     // extra dependency; the packaged copy ships that assembly and must not carry it.
     [InlineData("_TailwindResolveManifestDirectory", null)]
     [InlineData("_TailwindResolveWatchConfiguration", "ResolveProjectReferences")]
+    [InlineData("_TailwindStartWatch", "ResolveProjectReferences")]
     [InlineData("ResolveTailwindWatchConfiguration", null)]
     [InlineData("TailwindClean", null)]
     [InlineData("RunTailwindBeforeStaticWebAssets", "ResolveProjectReferences")]
@@ -234,6 +237,32 @@ public class TailwindTargetsTests
     [InlineData(PackagedTargets)]
     [InlineData(MultiTargetingTargets)]
     [InlineData(DevelopmentTargets)]
+    public void Targets_ShouldWireEveryStartWatchTaskInput(string targetsRelativePath)
+    {
+        var expected = typeof(TailwindStartWatchTask)
+            .GetProperties(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.DeclaredOnly)
+            .Where(property => property.CanWrite)
+            .Select(property => property.Name)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        var invocation = Assert.Single(LoadProject(targetsRelativePath).Descendants("TailwindStartWatchTask"));
+        var wired = invocation
+            .Attributes()
+            .Select(attribute => attribute.Name.LocalName)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Equal(expected, wired);
+        Assert.All(invocation.Attributes(), attribute => Assert.False(
+            string.IsNullOrWhiteSpace(attribute.Value),
+            $"{attribute.Name.LocalName} is wired to an empty value in {targetsRelativePath}."));
+    }
+
+    [Theory]
+    [InlineData(PackagedTargets)]
+    [InlineData(MultiTargetingTargets)]
+    [InlineData(DevelopmentTargets)]
     public void ResolveWatchConfiguration_ShouldReturnAnEmptySuccessfulResultWhenResolutionIsDisabled(
         string targetsRelativePath)
     {
@@ -262,6 +291,29 @@ public class TailwindTargetsTests
             "'@(TailwindBeforeStaticWebAssets)' != ''",
             helperCondition,
             StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(PackagedTargets)]
+    [InlineData(MultiTargetingTargets)]
+    [InlineData(DevelopmentTargets)]
+    public void Targets_ShouldRegisterTheWatchLauncherWithDotNetWatch(string targetsRelativePath)
+    {
+        var project = LoadProject(targetsRelativePath);
+        var customTargets = Assert.Single(project.Elements("PropertyGroup").Elements("CustomCollectWatchItems"));
+        var launchTarget = Assert.Single(
+            project.Elements("Target"),
+            target => target.Attribute("Name")?.Value == "_TailwindStartWatch");
+        var condition = launchTarget.Attribute("Condition")?.Value;
+
+        Assert.NotNull(condition);
+        Assert.Contains("_TailwindStartWatch", customTargets.Value, StringComparison.Ordinal);
+        Assert.Contains("'$(TailwindWatch)' == 'true'", condition, StringComparison.Ordinal);
+        Assert.Contains("'$(BuildingInsideVisualStudio)' == 'true'", condition, StringComparison.Ordinal);
+        Assert.Contains("'$(DotNetWatchBuild)' == 'true'", condition, StringComparison.Ordinal);
+        Assert.Contains("'$(DesignTimeBuild)' != 'true' OR '$(DotNetWatchBuild)' == 'true'", condition, StringComparison.Ordinal);
+        Assert.Equal("RunTailwindBeforeStaticWebAssets", launchTarget.Attribute("AfterTargets")?.Value);
+        Assert.Single(launchTarget.Elements("TailwindStartWatchTask"));
     }
 
     public static TheoryData<string> EveryTargetName()

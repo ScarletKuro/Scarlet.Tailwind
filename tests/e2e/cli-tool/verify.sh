@@ -93,6 +93,14 @@ else
     FAILED=1
 fi
 
+INFO_JSON="$(dotnet tailwind --scarlet-info --json 2>&1)" || fatal "--scarlet-info --json failed"
+if echo "$INFO_JSON" | grep -q '"project-watch-v1"'; then
+    echo "✓ JSON diagnostics advertise project-aware watch capability"
+else
+    echo "✗ JSON diagnostics do not advertise project-watch-v1"
+    FAILED=1
+fi
+
 section "Compiling"
 cp "$TEMPLATES_DIR/input.css.template" "input.css"
 cp "$TEMPLATES_DIR/markup.html.template" "markup.html"

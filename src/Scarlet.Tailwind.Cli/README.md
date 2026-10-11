@@ -103,6 +103,8 @@ dotnet tailwind --scarlet-info --json
 The diagnostic flag is recognised only as the *first* argument. Together with the first-position `watch`
 command, it is part of Scarlet's deliberately small reserved surface. `SCARLET_TAILWIND_PASSTHROUGH=1`
 disables both reservations. Diagnostics never downloads anything — it reports the URL it *would* use.
+The JSON form also exposes stable capability tokens such as `project-watch-v1`; the MSBuild package uses
+that token to verify that the installed CLI understands the watch protocol before launching it.
 
 ## Configuration
 
@@ -140,11 +142,12 @@ installed.
 
 ## Project-aware watch mode
 
-`--watch` is the one thing this tool does that the MSBuild task deliberately will not: a watch never exits,
-so a build that started one would hang instead of finishing. Run it here, in its own terminal, alongside
-`dotnet watch`. This is also the supported Blazor Hot Reload loop: Razor changes are applied to the running
-app while this process regenerates the stylesheet, which `dotnet watch` then treats as a changed static
-asset.
+`--watch` is the one thing this tool does that the MSBuild compile task deliberately will not: a watch never
+exits, so running the native watcher inside the task would hang the build. Run it here alongside
+`dotnet watch`, either explicitly in its own terminal or through the MSBuild package's opt-in
+`<TailwindWatch>true</TailwindWatch>` integration. This is the Blazor Hot Reload loop: Razor changes are
+applied to the running app while this process regenerates the stylesheet, which `dotnet watch` then treats
+as a changed static asset.
 
 When the current project references `Scarlet.Tailwind.MSBuild`, the project-aware form reuses its evaluated
 entry points, paths, runtime and Debug/Release defaults:
@@ -181,11 +184,15 @@ The project-aware form asks MSBuild for every normalized invocation, including t
 project, and adds Tailwind's watch flag itself. It also supports multiple configured entry points without
 duplicating any input or output paths on the command line.
 
-The command stays in the foreground and owns every native Tailwind process it starts. Closing the terminal
-or pressing Ctrl+C ends the whole watch session. A second command targeting any of the same generated files
-exits without launching duplicate writers. Each native process also runs from the project directory, exactly
-like the MSBuild task. For example, the equivalent raw form for a single entry point remains available when
-no MSBuild project is involved:
+The command stays in the foreground and owns every native Tailwind process it starts. Closing its terminal
+or pressing Ctrl+C ends the whole watch session. Concurrent project-aware commands that resolve to any of
+the same generated paths are deduplicated with lifetime locks in Scarlet's cache; the operating system
+releases the locks if the owner exits or crashes. This prevents repeated Visual Studio and dotnet-watch
+project evaluations from creating duplicate native watchers. Each native process also runs from the project
+directory, exactly like the MSBuild task.
+
+For example, the equivalent raw form for a single entry point remains available when no MSBuild project is
+involved:
 
 ```bash
 dotnet tailwind --input Styles/app.css --output wwwroot/css/app.css --watch

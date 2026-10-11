@@ -1,6 +1,7 @@
 <Project>
   <PropertyGroup>
     <TailwindEnabled Condition="'$(TailwindEnabled)' == ''">true</TailwindEnabled>
+    <TailwindWatch Condition="'$(TailwindWatch)' == ''">false</TailwindWatch>
     <TailwindMinify Condition="'$(TailwindMinify)' == ''">Auto</TailwindMinify>
     <TailwindOptimize Condition="'$(TailwindOptimize)' == ''">false</TailwindOptimize>
     <TailwindMap Condition="'$(TailwindMap)' == ''">Auto</TailwindMap>

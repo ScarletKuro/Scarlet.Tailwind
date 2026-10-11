@@ -20,6 +20,8 @@ Node.js, npm, or `node_modules` required.
 
 Raw CLI invocations and build integration work independently. When both packages are installed,
 `dotnet tailwind watch` intentionally bridges them by reading the project's evaluated MSBuild configuration.
+Set `<TailwindWatch>true</TailwindWatch>` to have Visual Studio or `dotnet watch` start that watcher during
+startup; the setting is opt-in, the normal build still produces CSS, and duplicate sessions are suppressed.
 
 ### Scarlet.Tailwind.MSBuild — Tailwind during `dotnet build`
 

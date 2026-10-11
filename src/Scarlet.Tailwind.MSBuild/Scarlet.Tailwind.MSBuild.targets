@@ -10,6 +10,7 @@
     <_TailwindTaskAssembly>$(_TailwindTaskProjectDir)bin\$(Configuration)\netstandard2.0\Scarlet.Tailwind.MSBuild.dll</_TailwindTaskAssembly>
     <TailwindRuntimeDirectory Condition="'$(TailwindRuntimeDirectory)' == ''">$(_TailwindTaskProjectDir)bin\runtimes</TailwindRuntimeDirectory>
     <TailwindEnabled Condition="'$(TailwindEnabled)' == ''">true</TailwindEnabled>
+    <TailwindWatch Condition="'$(TailwindWatch)' == ''">false</TailwindWatch>
     <TailwindMinify Condition="'$(TailwindMinify)' == ''">Auto</TailwindMinify>
     <TailwindOptimize Condition="'$(TailwindOptimize)' == ''">false</TailwindOptimize>
     <TailwindMap Condition="'$(TailwindMap)' == ''">Auto</TailwindMap>
@@ -23,6 +24,16 @@
   <UsingTask TaskName="Scarlet.Tailwind.MSBuild.TailwindCompileTask"
              AssemblyFile="$(_TailwindTaskAssembly)"
              TaskFactory="TaskHostFactory" />
+  <UsingTask TaskName="Scarlet.Tailwind.MSBuild.TailwindStartWatchTask"
+             AssemblyFile="$(_TailwindTaskAssembly)"
+             TaskFactory="TaskHostFactory" />
+
+  <PropertyGroup>
+    <!-- Current dotnet-watch implementations execute every target named by CustomCollectWatchItems during
+         their design-time project evaluation. Appending unconditionally is intentional: TailwindWatch can
+         be declared after the package props import, and the target condition remains the source of truth. -->
+    <CustomCollectWatchItems>$(CustomCollectWatchItems);_TailwindStartWatch</CustomCollectWatchItems>
+  </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="$(_TailwindTaskProjectDir)Scarlet.Tailwind.MSBuild.csproj"
@@ -107,6 +118,17 @@
   <Target Name="ResolveTailwindWatchConfiguration"
           DependsOnTargets="_TailwindResolveWatchConfiguration"
           Returns="@(_TailwindWatchInvocations)" />
+
+  <!-- TailwindWatch is deliberately opt-in. The ordinary build above still produces the initial CSS;
+       this target only starts the independently owned CLI watcher for Visual Studio or dotnet watch.
+       dotnet watch reaches it through CustomCollectWatchItems even when Hot Reload is enabled. -->
+  <Target Name="_TailwindStartWatch"
+          AfterTargets="RunTailwindBeforeStaticWebAssets"
+          DependsOnTargets="ResolveProjectReferences"
+          Condition="'$(TailwindEnabled)' == 'true' AND '$(TailwindWatch)' == 'true' AND ('$(BuildingInsideVisualStudio)' == 'true' OR '$(DotNetWatchBuild)' == 'true') AND ('$(DesignTimeBuild)' != 'true' OR '$(DotNetWatchBuild)' == 'true') AND '@(TailwindBeforeStaticWebAssets)' != '' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
+    <TailwindStartWatchTask ProjectPath="$(MSBuildProjectFullPath)"
+                            Configuration="$(Configuration)" />
+  </Target>
 
   <!-- Hooked to both targets deliberately. In a single-target-framework project CoreClean runs with
        $(IntermediateOutputPath) set to obj/<config>/<tfm>/, which is where the build wrote the manifest. In

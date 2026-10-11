@@ -41,6 +41,8 @@ public class DiagnosticsReportTests
 
         // Assert
         Assert.Contains("(not needed)", report);
+        Assert.Contains("Capabilities", report);
+        Assert.Contains(TailwindCliCapabilities.ProjectWatchV1, report);
         Assert.DoesNotContain("https://github.com/tailwindlabs/tailwindcss/releases", report);
     }
 
@@ -148,6 +150,9 @@ public class DiagnosticsReportTests
         var root = document.RootElement;
 
         Assert.Equal("embedded", root.GetProperty("source").GetString());
+        Assert.Contains(
+            TailwindCliCapabilities.ProjectWatchV1,
+            root.GetProperty("capabilities").EnumerateArray().Select(static item => item.GetString()));
         Assert.Equal("linux-x64", root.GetProperty("runtimeIdentifier").GetString());
         Assert.Equal("/tool/tailwindcss", root.GetProperty("tailwindExecutable").GetString());
         Assert.Equal(JsonValueKind.Null, root.GetProperty("downloadUrl").ValueKind);

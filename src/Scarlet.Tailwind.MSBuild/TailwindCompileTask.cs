@@ -654,7 +654,7 @@ public sealed class TailwindCompileTask : Task
             if (IsOption(argument, "-w") || IsOption(argument, "--watch") || IsOption(argument, "--poll"))
             {
                 Log.LogError(
-                    "{0} must not contain '{1}'. Tailwind watch mode does not exit during a build; use a Watch item or run 'dotnet tailwind --watch' separately.",
+                    "{0} must not contain '{1}'. Tailwind watch mode does not exit inside the compile task; set TailwindWatch=true or run 'dotnet tailwind watch' separately.",
                     source,
                     argument);
             }

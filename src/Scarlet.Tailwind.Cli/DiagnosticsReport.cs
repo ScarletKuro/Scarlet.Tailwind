@@ -22,6 +22,7 @@ internal static class DiagnosticsReport
         report.AppendLine();
         Append(report, "Scarlet.Tailwind.Cli", DescribePackage());
         Append(report, "Pinned Tailwind version", TailwindBuildInfo.PinnedTailwindVersion);
+        Append(report, "Capabilities", TailwindCliCapabilities.ProjectWatchV1);
         Append(report, "Host platform", $"{resolution.Platform} ({resolution.RuntimeIdentifier})");
         Append(report, "Tool directory", AppContext.BaseDirectory);
         report.AppendLine();
@@ -56,6 +57,7 @@ internal static class DiagnosticsReport
         {
             ["package"] = DescribePackage(),
             ["pinnedTailwindVersion"] = TailwindBuildInfo.PinnedTailwindVersion,
+            ["capabilities"] = new[] { TailwindCliCapabilities.ProjectWatchV1 },
             ["platform"] = resolution.Platform.ToString(),
             ["runtimeIdentifier"] = resolution.RuntimeIdentifier,
             ["toolDirectory"] = AppContext.BaseDirectory,
