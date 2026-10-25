@@ -158,7 +158,7 @@
       <Output TaskParameter="Lines" ItemName="_TailwindFilesToClean" />
     </ReadLinesFromFile>
     <Delete Files="@(_TailwindFilesToClean)" Condition="'@(_TailwindFilesToClean)' != ''" />
-    <Delete Files="$(_TailwindManifestDirectory)/Tailwind.generated.txt"
+    <Delete Files="$(_TailwindManifestDirectory)/Tailwind.generated.txt;$(_TailwindManifestDirectory)/Tailwind.removed.txt"
             Condition="'$(_TailwindManifestDirectory)' != ''" />
   </Target>
 </Project>

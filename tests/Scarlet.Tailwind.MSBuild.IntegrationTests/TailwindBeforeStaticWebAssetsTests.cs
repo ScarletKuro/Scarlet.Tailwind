@@ -349,6 +349,40 @@ public class TailwindBeforeStaticWebAssetsTests
         var manifest = File.ReadAllText(workspace.PathTo("obj", DotnetCli.Configuration, TargetFramework, "staticwebassets.build.json"));
         Assert.DoesNotContain("extra.css", manifest);
         Assert.Contains("app.css", manifest);
+
+        // The removal is recorded for other instances of this build; clean must not leave that record behind.
+        var record = workspace.PathTo("obj", DotnetCli.Configuration, TargetFramework, "Scarlet.Tailwind", TailwindCompileTask.RemovedRecordFileName);
+        Assert.True(File.Exists(record), $"Expected a removal record at {record}.");
+        Assert.Equal(0, (await RunDotnet(workspace, $"clean --configuration {DotnetCli.Configuration}")).ExitCode);
+        Assert.False(File.Exists(record), "dotnet clean should remove the removal record.");
+    }
+
+    [Fact]
+    public async Task RemovedCompilation_IsDroppedByEveryInstanceThatSawItsFile()
+    {
+        // Two instances of one single-target project in one build, both evaluated while extra.css existed. Each
+        // compiles itself, one after the other; the second finds a manifest the first already rewrote.
+        using var workspace = CreateRazorClassLibrary();
+        workspace.WriteFile("Styles/extra.css", File.ReadAllText(workspace.PathTo("Styles", "app.css")));
+        var withoutExtra = Project("Microsoft.NET.Sdk.Razor", additionalProperties: "");
+        workspace.WriteFile("GeneratedAssetsRcl.csproj", withoutExtra.Replace(
+            "</TailwindBeforeStaticWebAssets>",
+            """
+            </TailwindBeforeStaticWebAssets>
+                <TailwindBeforeStaticWebAssets Include="Styles/extra.css">
+                  <OutputPath>wwwroot/css/extra.css</OutputPath>
+                </TailwindBeforeStaticWebAssets>
+            """));
+        Assert.Equal(0, (await RunDotnet(workspace, $"build --configuration {DotnetCli.Configuration}")).ExitCode);
+        Assert.True(File.Exists(workspace.PathTo("wwwroot", "css", "extra.css")));
+
+        workspace.WriteFile("GeneratedAssetsRcl.csproj", withoutExtra);
+        workspace.WriteFile("TwoInstances.proj", TailwindMultiTargetTests.TwoInstancesDriver("GeneratedAssetsRcl.csproj", ""));
+
+        var build = await RunDotnet(workspace, $"msbuild TwoInstances.proj -p:Configuration={DotnetCli.Configuration}");
+
+        Assert.Equal(0, build.ExitCode);
+        Assert.False(File.Exists(workspace.PathTo("wwwroot", "css", "extra.css")));
     }
 
     /// <summary>

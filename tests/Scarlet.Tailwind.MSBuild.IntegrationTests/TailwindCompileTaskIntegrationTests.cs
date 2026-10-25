@@ -530,6 +530,38 @@ public class TailwindCompileTaskIntegrationTests
     }
 
     [Fact]
+    public void CompileTask_KeepsReportingARemovalUntilTheOutputIsProducedAgain()
+    {
+        // A second instance of the project compiling right after the first finds the stale output already gone
+        // from the manifest, yet its own wwwroot glob still lists it. It has to hear about the removal too.
+        using var workspace = CreateWorkspace("compile-removal-record");
+        workspace.WriteFile("Styles/extra.css", File.ReadAllText(workspace.PathTo("Styles", "app.css")));
+        var extra = new TaskItem(Path.Combine("Styles", "extra.css"));
+        extra.SetMetadata("OutputPath", Path.Combine("wwwroot", "css", "extra.css"));
+        var extraCss = workspace.PathTo("wwwroot", "css", "extra.css");
+
+        var both = CreateTask(workspace);
+        both.Compilations = [CreateItem(), extra];
+        Assert.True(both.Execute());
+        Assert.Empty(both.RemovedFiles);
+
+        var first = CreateTask(workspace);
+        Assert.True(first.Execute());
+        Assert.Equal([extraCss], first.RemovedFiles.Select(static file => file.ItemSpec));
+        Assert.False(File.Exists(extraCss));
+
+        var second = CreateTask(workspace);
+        Assert.True(second.Execute());
+        Assert.Equal([extraCss], second.RemovedFiles.Select(static file => file.ItemSpec));
+
+        var again = CreateTask(workspace);
+        again.Compilations = [CreateItem(), extra];
+        Assert.True(again.Execute());
+        Assert.Empty(again.RemovedFiles);
+        Assert.True(File.Exists(extraCss));
+    }
+
+    [Fact]
     public void CompileTask_ConcurrentRunsForOneProject_TakeTurns()
     {
         // One project built as two MSBuild instances in the same build - a ProjectReference passing its own
