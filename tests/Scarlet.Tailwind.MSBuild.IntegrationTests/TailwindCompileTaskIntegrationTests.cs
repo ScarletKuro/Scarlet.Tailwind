@@ -529,6 +529,57 @@ public class TailwindCompileTaskIntegrationTests
         Assert.True(task.Execute());
     }
 
+    [Fact]
+    public void CompileTask_ConcurrentRunsForOneProject_TakeTurns()
+    {
+        // One project built as two MSBuild instances in the same build - a ProjectReference passing its own
+        // global properties is enough - compiles twice. Overlapping, both processes write the same CSS and
+        // both read and rewrite the manifest that stale-output removal and clean depend on.
+        using var workspace = CreateWorkspace("compile-concurrent");
+        var tasks = new[] { CreateTask(workspace), CreateTask(workspace) };
+        var results = new bool[tasks.Length];
+        using var start = new Barrier(tasks.Length);
+
+        // Dedicated threads, as MSBuild nodes would be: the task blocks on its lock for the whole compilation.
+        var threads = tasks.Select((task, index) => new Thread(() =>
+        {
+            start.SignalAndWait();
+            results[index] = task.Execute();
+        })).ToArray();
+
+        foreach (var thread in threads)
+        {
+            thread.Start();
+        }
+
+        foreach (var thread in threads)
+        {
+            thread.Join();
+        }
+
+        Assert.All(results, Assert.True);
+
+        // Whichever run started its process second must have started it only after the first run had logged
+        // its last line - otherwise the two processes overlapped.
+        var runs = tasks
+            .Select(static task => (MockBuildEngine)task.BuildEngine)
+            .Select(static engine => (Engine: engine, Executing: engine.Messages.Single(static message =>
+                message.Message?.StartsWith("Executing: ", StringComparison.Ordinal) == true).Timestamp))
+            .OrderBy(static run => run.Executing)
+            .ToArray();
+        var lastLineOfFirstRun = runs[0].Engine.Messages.Max(static message => message.Timestamp);
+        Assert.True(
+            runs[1].Executing >= lastLineOfFirstRun,
+            $"The second compilation started at {runs[1].Executing:HH:mm:ss.fff}, before the first one finished at {lastLineOfFirstRun:HH:mm:ss.fff}.");
+
+        // Both started together and a compilation holds the lock for its whole run, so the second one queued
+        // rather than merely happening to start late.
+        Assert.Contains(runs[1].Engine.Messages, static message =>
+            message.Message?.Contains("Waiting for another build compiling Tailwind", StringComparison.Ordinal) == true);
+
+        Assert.Contains(".text-3xl", File.ReadAllText(workspace.PathTo("wwwroot", "css", "app.css")));
+    }
+
     private TempWorkspace CreateWorkspace(string name)
     {
         var workspace = TempWorkspace.Create(name);

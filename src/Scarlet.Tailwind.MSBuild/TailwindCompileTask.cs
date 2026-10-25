@@ -111,6 +111,12 @@ public sealed class TailwindCompileTask : Task
                 return !Log.HasLoggedErrors;
             }
 
+            // Taken before the manifest is read: the stale-output removal below must see what the previous
+            // compilation of this project wrote, not race it.
+            using var runLock = TailwindRunLock.Acquire(
+                ProjectDirectory,
+                directory => Log.LogMessage(MessageImportance.High, $"Waiting for another build compiling Tailwind in {directory}..."));
+
             var manifestDirectory = ResolveManifestDirectory();
             var manifestPath = Path.Combine(manifestDirectory, "Tailwind.generated.txt");
             var expectedFiles = entries.SelectMany(static entry => entry.ExpectedOutputs).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();

@@ -144,6 +144,14 @@ happen to exercise, so everything passes and the property silently does nothing 
 `Targets_ShouldWireEveryCompileTaskInput` derives the expected list by reflection for that reason. If you add
 a task parameter, the test tells you to wire it; do not add it to an allow-list.
 
+**Inner builds compile through the outer build, never on their own.** `_TailwindCompileFromInnerBuild` calls
+`RunTailwindBeforeStaticWebAssets` on the outer instance and applies the `Change`-tagged items it `Returns`.
+That is what makes app `ProjectReference` builds, `dotnet build -f` and `--no-incremental` rebuilds see the CSS
+(`TailwindMultiTargetTests`). Two details are load-bearing: removed outputs must be removed from `Content` in
+their project-relative form, because target-time `Remove` compares item specs and the SDK's glob is relative;
+and `TailwindRunLock` must be held from reading the manifest to rewriting it. See *Inner builds the outer
+build did not dispatch* in the spec.
+
 **`--watch` must never reach the task.** Tailwind's watch mode does not exit, so with the default
 `TailwindTimeoutMilliseconds` of `0` the build waits forever. It is documented as forbidden in
 `TailwindAdditionalArguments`. Note that it exits immediately without a TTY, which makes it useless for

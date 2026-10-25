@@ -319,6 +319,38 @@ public class TailwindBeforeStaticWebAssetsTests
             "dotnet clean should remove the generated CSS, which it learns about from the manifest.");
     }
 
+    [Fact]
+    public async Task RemovedCompilation_DoesNotFailTheNextBuild()
+    {
+        // The SDK's wwwroot glob is evaluated before the task deletes outputs it no longer produces, so the next
+        // build still lists the deleted file as Content - and the static web assets SDK fails on a file that is
+        // gone, until yet another build. The task reports it as an absolute path, the glob holds it relative.
+        using var workspace = CreateRazorClassLibrary();
+        workspace.WriteFile("Styles/extra.css", File.ReadAllText(workspace.PathTo("Styles", "app.css")));
+        var withoutExtra = Project("Microsoft.NET.Sdk.Razor", additionalProperties: "");
+        var withExtra = withoutExtra.Replace(
+            "</TailwindBeforeStaticWebAssets>",
+            """
+            </TailwindBeforeStaticWebAssets>
+                <TailwindBeforeStaticWebAssets Include="Styles/extra.css">
+                  <OutputPath>wwwroot/css/extra.css</OutputPath>
+                </TailwindBeforeStaticWebAssets>
+            """);
+
+        workspace.WriteFile("GeneratedAssetsRcl.csproj", withExtra);
+        Assert.Equal(0, (await RunDotnet(workspace, $"build --configuration {DotnetCli.Configuration}")).ExitCode);
+        Assert.True(File.Exists(workspace.PathTo("wwwroot", "css", "extra.css")));
+
+        workspace.WriteFile("GeneratedAssetsRcl.csproj", withoutExtra);
+        var build = await RunDotnet(workspace, $"build --configuration {DotnetCli.Configuration}");
+
+        Assert.Equal(0, build.ExitCode);
+        Assert.False(File.Exists(workspace.PathTo("wwwroot", "css", "extra.css")));
+        var manifest = File.ReadAllText(workspace.PathTo("obj", DotnetCli.Configuration, TargetFramework, "staticwebassets.build.json"));
+        Assert.DoesNotContain("extra.css", manifest);
+        Assert.Contains("app.css", manifest);
+    }
+
     /// <summary>
     /// The entry stylesheet and the markup that gives the scanner something to find.
     /// </summary>

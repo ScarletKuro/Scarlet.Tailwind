@@ -41,7 +41,7 @@ tests/e2e/
 | Scenario | The claim it tests |
 |---|---|
 | `package-installation` | The packed task loads in a real consumer build, compiles, packs the CSS under `staticwebassets/`, and cleans up after itself |
-| `multi-tfm` | A three-TFM Razor Class Library runs Tailwind once, packs the CSS under `staticwebassets/` exactly once, and is not re-run by `pack --no-build` |
+| `multi-tfm` | A three-TFM Razor Class Library runs Tailwind once, packs the CSS under `staticwebassets/` exactly once, and is not re-run by `pack --no-build`. A `--no-incremental` rebuild with the CSS deleted still puts it in every TFM's manifest and the package. An app referencing the library, built on its own as `dotnet run` does, runs Tailwind once and serves the library's CSS |
 | `incremental` | A class added to a `.razor` file reaches the next build's CSS, and changing a setting discards the previous output |
 | `hot-reload` | `dotnet tailwind watch` discovers the packed MSBuild configuration, then Blazor Hot Reload and Tailwind update component markup and generated CSS without restarting the app |
 | `monorepo-download` | Four projects sharing one runtime directory coordinate a single download instead of racing |

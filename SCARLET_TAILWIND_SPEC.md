@@ -888,6 +888,36 @@ Four parts of that condition are load-bearing and should each be commented in th
   Without the guard, `dotnet pack --no-build` re-runs Tailwind and rewrites `wwwroot` after the integrity
   manifest was computed, so the package ships bytes that do not match their own hashes.
 
+### Inner builds the outer build did not dispatch
+
+Skipping inner builds assumes every inner build is dispatched by this project's own outer build, after it
+compiled. Three common builds break that, and each one silently shipped or served a library without its CSS:
+
+- **An app's `ProjectReference`** builds the referenced framework's inner build directly. `dotnet run` on the
+  app never builds the library's outer build, so Tailwind never ran.
+- **`dotnet build -f`** does the same with no app involved.
+- **A rebuild** runs `Clean` first, which evaluates and caches every inner build while the CSS is missing.
+  Content the outer build registers after compiling cannot reach those cached item lists, so the manifests
+  came out empty and `pack --no-build` packed nothing.
+
+`_TailwindCompileFromInnerBuild` therefore asks the outer build to compile, by calling
+`RunTailwindBeforeStaticWebAssets` on the same project without `TargetFramework`, and applies the changes the
+target `Returns` to its own `Content`. MSBuild runs a target once per project instance and returns its cached
+result to every later caller, so a normal multi-target build still compiles exactly once, before dispatch, and
+an app-only build compiles exactly once however many frameworks or apps ask.
+
+Two rules came out of testing it:
+
+- **Removed outputs are matched project-relative.** The task reports them as absolute paths; the SDK's
+  `wwwroot` glob holds them relative, and `Remove` inside a target compares item specs. With absolute paths
+  alone the stale entry survives and the static web assets SDK fails with *No file exists for the asset* -
+  which also happened in plain single-target projects, on the first build after an entry point was removed
+  or its `OutputPath` changed.
+- **Compilations of one project take turns.** A caller that reaches the project with different global
+  properties addresses a different outer instance, which compiles again. `TailwindCompileTask` holds a
+  machine-wide mutex keyed on the project directory around reading the manifest, compiling and rewriting it;
+  overlapping compilations measurably did overlap before it.
+
 Three copies of the targets are needed — `build/`, `buildMultiTargeting/`, and a development copy imported
 by the samples and integration tests — and a `TailwindTargetsTests` fixture should assert they declare the
 same targets and invoke the task identically, normalising the one allowed difference in the development

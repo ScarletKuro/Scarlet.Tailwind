@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!--
+    A plain ProjectReference, as an app in the same repository would have. Building this app reaches the
+    library's net10.0 inner build directly and never the library's outer build.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="../TestRclMultiTfm/TestRclMultiTfm.csproj" />
+  </ItemGroup>
+
+</Project>
