@@ -28,6 +28,27 @@ public sealed class TailwindCompileTask : Task
     /// </summary>
     internal const string RemovedRecordFileName = "Tailwind.removed.txt";
 
+    /// <summary>
+    /// 0xC0000005, STATUS_ACCESS_VIOLATION, as a process exit code.
+    /// </summary>
+    internal const int AccessViolationExitCode = unchecked((int)0xC0000005);
+
+    internal const int EmulationCrashRetries = 2;
+
+    /// <summary>
+    /// Whether a failed run is the intermittent crash of the emulated binary, and worth running again.
+    /// </summary>
+    /// <remarks>
+    /// Tailwind publishes no native Windows ARM64 build, so that platform runs the x64 binary under emulation, and
+    /// there it intermittently dies with an access violation - most often in the first runs of a freshly
+    /// downloaded or freshly restored binary. Native platforms never did, and neither did Scarlet.Bun or
+    /// Scarlet.Sass on the same machines, whose runtimes are native ARM64. A compilation only rewrites its output
+    /// from the same inputs, so running it again is safe. Every other failure, and this one anywhere else, still
+    /// fails the build on the spot.
+    /// </remarks>
+    internal static bool IsEmulationCrash(int exitCode, Platform platform) =>
+        exitCode == AccessViolationExitCode && platform == Platform.WindowsArm64;
+
     [Required]
     public ITaskItem[] Compilations { get; set; } = Array.Empty<ITaskItem>();
 
@@ -148,6 +169,7 @@ public sealed class TailwindCompileTask : Task
             }
 
             Log.LogMessage(MessageImportance.High, $"Using Tailwind at: {tailwindPath}");
+            var currentPlatform = TailwindRuntimeResolver.GetCurrentPlatform();
 
             // Tailwind's argument parser collapses repeated --input arguments to the last value, so one
             // invocation can compile only one stylesheet. Run one process per entry point rather than
@@ -158,6 +180,15 @@ public sealed class TailwindCompileTask : Task
                 Log.LogMessage(MessageImportance.High, $"Executing: {TailwindCommandLine.FormatProcessCommand(tailwindPath, processArguments)}");
 
                 var result = RunProcess(tailwindPath, processArguments, gate);
+                for (var retry = 1; result is not null && IsEmulationCrash(result.ExitCode, currentPlatform) && retry <= EmulationCrashRetries; retry++)
+                {
+                    // Worded unlike "Executing:", which build logs are searched for to count real compilations.
+                    Log.LogMessage(
+                        MessageImportance.High,
+                        $"Tailwind crashed under x64 emulation on Windows ARM64 (access violation); running it again ({retry} of {EmulationCrashRetries}).");
+                    result = RunProcess(tailwindPath, processArguments, gate);
+                }
+
                 if (result is null)
                 {
                     return false;
