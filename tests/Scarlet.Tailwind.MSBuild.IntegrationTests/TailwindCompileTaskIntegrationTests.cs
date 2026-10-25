@@ -562,6 +562,41 @@ public class TailwindCompileTaskIntegrationTests
     }
 
     [Fact]
+    public void CompileTask_ReportsEveryRemovalBatchNotOnlyTheLast()
+    {
+        // Instances with different entry points can each remove something in the same build. The instance that
+        // compiles last must still hear about the first batch, or its glob keeps that deleted file as Content.
+        using var workspace = CreateWorkspace("compile-removal-batches");
+        TaskItem Entry(string name)
+        {
+            workspace.WriteFile($"Styles/{name}.css", File.ReadAllText(workspace.PathTo("Styles", "app.css")));
+            var item = new TaskItem(Path.Combine("Styles", $"{name}.css"));
+            item.SetMetadata("OutputPath", Path.Combine("wwwroot", "css", $"{name}.css"));
+            return item;
+        }
+
+        var extra = Entry("extra");
+        var third = Entry("third");
+        var extraCss = workspace.PathTo("wwwroot", "css", "extra.css");
+        var thirdCss = workspace.PathTo("wwwroot", "css", "third.css");
+
+        var all = CreateTask(workspace);
+        all.Compilations = [CreateItem(), extra, third];
+        Assert.True(all.Execute());
+
+        var dropsExtra = CreateTask(workspace);
+        dropsExtra.Compilations = [CreateItem(), third];
+        Assert.True(dropsExtra.Execute());
+        Assert.Equal([extraCss], dropsExtra.RemovedFiles.Select(static file => file.ItemSpec));
+
+        var dropsThird = CreateTask(workspace);
+        Assert.True(dropsThird.Execute());
+        Assert.Equal(
+            new[] { extraCss, thirdCss }.Order(StringComparer.OrdinalIgnoreCase),
+            dropsThird.RemovedFiles.Select(static file => file.ItemSpec).Order(StringComparer.OrdinalIgnoreCase));
+    }
+
+    [Fact]
     public void CompileTask_ConcurrentRunsForOneProject_TakeTurns()
     {
         // One project built as two MSBuild instances in the same build - a ProjectReference passing its own
