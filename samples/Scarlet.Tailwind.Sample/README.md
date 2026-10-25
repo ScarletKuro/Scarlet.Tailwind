@@ -35,6 +35,10 @@ Run each command in its own terminal. The Tailwind command reads this project's 
 point and settings, so paths do not have to be repeated. Blazor applies Razor changes without restarting,
 Tailwind regenerates the stylesheet, and `dotnet watch` refreshes the changed static asset in the browser.
 
+Alternatively, add `<TailwindWatch>true</TailwindWatch>` to the project after installing the CLI tool, then
+run only `dotnet watch`. The property is explicitly opt-in; Scarlet shell-launches the project-aware
+watcher during startup while the normal build continues to produce the initial CSS as usual.
+
 The sample's `Watch` items support the slower MSBuild-only alternative:
 
 ```bash

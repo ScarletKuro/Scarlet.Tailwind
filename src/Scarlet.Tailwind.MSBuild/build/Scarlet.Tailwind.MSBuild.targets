@@ -1,6 +1,15 @@
 <Project>
   <UsingTask TaskName="Scarlet.Tailwind.MSBuild.TailwindCompileTask"
              AssemblyFile="$(MSBuildThisFileDirectory)../tools/netstandard2.0/Scarlet.Tailwind.MSBuild.dll" />
+  <UsingTask TaskName="Scarlet.Tailwind.MSBuild.TailwindStartWatchTask"
+             AssemblyFile="$(MSBuildThisFileDirectory)../tools/netstandard2.0/Scarlet.Tailwind.MSBuild.dll" />
+
+  <PropertyGroup>
+    <!-- Current dotnet-watch implementations execute every target named by CustomCollectWatchItems during
+         their design-time project evaluation. Appending unconditionally is intentional: TailwindWatch can
+         be declared after the package props import, and the target condition remains the source of truth. -->
+    <CustomCollectWatchItems>$(CustomCollectWatchItems);_TailwindStartWatch</CustomCollectWatchItems>
+  </PropertyGroup>
 
   <!-- A target, not a file-scope PropertyGroup: $(IntermediateOutputPath) is not set when this file is
        imported, only by the time a target runs. Both entry points below depend on this one rather than
@@ -142,6 +151,15 @@
   <Target Name="ResolveTailwindWatchConfiguration"
           DependsOnTargets="_TailwindResolveWatchConfiguration"
           Returns="@(_TailwindWatchInvocations)" />
+
+  <!-- TailwindWatch is deliberately opt-in. The ordinary build above still produces the initial CSS;
+       dotnet watch starts the independently owned CLI watcher through CustomCollectWatchItems during
+       design-time evaluation, including when Hot Reload is enabled. -->
+  <Target Name="_TailwindStartWatch"
+          Condition="'$(TailwindEnabled)' == 'true' AND '$(TailwindWatch)' == 'true' AND '$(DotNetWatchBuild)' == 'true' AND '$(DesignTimeBuild)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
+    <TailwindStartWatchTask ProjectPath="$(MSBuildProjectFullPath)"
+                            Configuration="$(Configuration)" />
+  </Target>
 
   <!-- Hooked to both targets deliberately. In a single-target-framework project CoreClean runs with
        $(IntermediateOutputPath) set to obj/<config>/<tfm>/, which is where the build wrote the manifest. In

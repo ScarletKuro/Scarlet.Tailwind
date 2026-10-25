@@ -397,6 +397,7 @@ question when both are set, and would diverge from the item contract both siblin
 | Property | Default | Meaning |
 | --- | --- | --- |
 | `TailwindEnabled` | `true` | Enables `RunTailwindBeforeStaticWebAssets` |
+| `TailwindWatch` | `false` | Explicitly opts into launching `dotnet tailwind watch` during `dotnet watch` startup |
 | `TailwindMinify` | `Auto` | `Auto`, `true`, or `false`. Renders `--minify` |
 | `TailwindOptimize` | `false` | Renders `--optimize`. Ignored when minifying |
 | `TailwindMap` | `Auto` | `Auto`, `true`, `false`, or a path. `true` inlines the map, a path writes it there |
@@ -450,9 +451,10 @@ Tailwind supports first-class. Every flag in *Upstream Facts* therefore has a ho
 | `--poll` | **rejected by the MSBuild task** |
 
 The two exclusions are the only ones, and they share a reason rather than being a judgement call:
-Tailwind's watch mode never exits, so a build that invoked it would hang instead of completing, and
-`--poll` is valid only alongside `--watch`. Neither may reach Tailwind through `AdditionalArguments`.
-Watching is the separately managed CLI's job — see *Competitor Analysis*.
+Tailwind's watch mode never exits, so the compile task would hang instead of completing, and `--poll` is
+valid only alongside `--watch`. Neither may reach Tailwind through `AdditionalArguments`. Watching belongs
+to the separately managed CLI. `TailwindWatch=true` may launch that CLI during watch startup, but it never
+turns the build's native Tailwind invocation into a watcher.
 
 If Tailwind adds a flag, the corresponding property is a one-line addition plus its wiring test, and the
 table above is the checklist that makes the omission obvious.
@@ -1085,14 +1087,24 @@ Three gaps are common to all of them, and each is something the sibling platform
 A fourth gap is narrower but decisive for the incumbent's users: **watching should not be a hosted
 service.** `Scarlet.Tailwind` should have no runtime package, no `IHostingStartup`, and no long-lived child
 process owned by the application. Blazor Hot Reload applies Razor deltas without running arbitrary MSBuild
-targets, and a `Watch` item only adds a file to the watch set; it does not force the Tailwind target to run.
-The supported Hot Reload loop is therefore two explicit foreground processes: `dotnet watch` owns the app
-and browser refresh, while `dotnet tailwind watch` queries the MSBuild project for its evaluated entry
-points and settings, then owns the native Tailwind watchers that regenerate CSS. The raw
-`dotnet tailwind --input ... --output ... --watch` form remains available without an MSBuild project.
-Nothing owns a hidden child process, so nothing can leak one. An MSBuild-only alternative remains available
-with explicit `Watch` items and `dotnet watch --no-hot-reload`, at the honest cost of a full rebuild and
-application restart per save.
+targets on each file change, and a `Watch` item only adds a file to the watch set; it does not force the
+Tailwind target to run.
+
+The supported Hot Reload loop has `dotnet watch` own the app and browser refresh, while `dotnet tailwind
+watch` queries the MSBuild project for its evaluated entry points and settings, then owns the native
+Tailwind watchers that regenerate CSS. Users can run those as two explicit foreground processes. As an
+opt-in convenience, `TailwindWatch=true` also lets the MSBuild package shell-launch the same CLI command
+at startup when both `DotNetWatchBuild` and `DesignTimeBuild` are true. It is never enabled implicitly.
+`CustomCollectWatchItems` is the dotnet-watch detection point, including its Hot Reload evaluation path;
+no environment-variable heuristic is needed.
+
+The detached CLI owns its native children and holds OS-backed lifetime locks keyed by generated paths in
+Scarlet's cache. Repeated project evaluation therefore exits without spawning a second watcher, and a crash
+releases the locks without stale PID-file recovery. The user stops an automatically launched session by
+closing its window or process. The raw `dotnet tailwind --input ... --output ... --watch` form remains
+available without an MSBuild project. An MSBuild-only alternative remains available with explicit `Watch`
+items and `dotnet watch --no-hot-reload`, at the honest cost of a full rebuild and application restart per
+save.
 
 ## Documentation Requirements
 
@@ -1108,10 +1120,11 @@ application restart per save.
 - `DEPLOYMENT.md` documenting version derivation and the pointer-last push rule as runnable commands.
 
 The `dotnet watch` section must explain that `--watch`, `-w`, and `--poll` are rejected in
-`TailwindAdditionalArguments`. Tailwind's watch mode never exits, so the build would hang rather than
-finish. The supported Hot Reload approach is a separately managed `dotnet tailwind watch` process beside
-`dotnet watch`; the command resolves its configuration from `Scarlet.Tailwind.MSBuild`. `Watch` items are
-only sufficient when Hot Reload is disabled so each change causes a full build and restart.
+`TailwindAdditionalArguments`. Tailwind's watch mode never exits, so the compile task would hang rather than
+finish. The supported Hot Reload process is `dotnet tailwind watch`, either started explicitly beside
+`dotnet watch` or shell-launched by the opt-in `TailwindWatch` property; the command resolves its
+configuration from `Scarlet.Tailwind.MSBuild`. `Watch` items are only sufficient when Hot Reload is disabled
+so each change causes a full build and restart.
 
 ### Writing Your Entry Stylesheet
 
