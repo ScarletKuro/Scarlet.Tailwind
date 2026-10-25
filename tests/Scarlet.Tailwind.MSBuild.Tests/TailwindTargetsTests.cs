@@ -35,6 +35,7 @@ public class TailwindTargetsTests
 
     private static readonly string[] TargetNames =
     [
+        "_TailwindCompileFromInnerBuild",
         "_TailwindResolveManifestDirectory",
         "_TailwindResolveWatchConfiguration",
         "ResolveTailwindWatchConfiguration",
@@ -114,6 +115,7 @@ public class TailwindTargetsTests
     [Theory]
     // The development copy has to build the task assembly before it can call into it, so it prefixes one
     // extra dependency; the packaged copy ships that assembly and must not carry it.
+    [InlineData("_TailwindCompileFromInnerBuild", null)]
     [InlineData("_TailwindResolveManifestDirectory", null)]
     [InlineData("_TailwindResolveWatchConfiguration", "ResolveProjectReferences")]
     [InlineData("ResolveTailwindWatchConfiguration", null)]

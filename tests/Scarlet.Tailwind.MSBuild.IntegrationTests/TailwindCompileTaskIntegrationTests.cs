@@ -529,6 +529,124 @@ public class TailwindCompileTaskIntegrationTests
         Assert.True(task.Execute());
     }
 
+    [Fact]
+    public void CompileTask_KeepsReportingARemovalUntilTheOutputIsProducedAgain()
+    {
+        // A second instance of the project compiling right after the first finds the stale output already gone
+        // from the manifest, yet its own wwwroot glob still lists it. It has to hear about the removal too.
+        using var workspace = CreateWorkspace("compile-removal-record");
+        workspace.WriteFile("Styles/extra.css", File.ReadAllText(workspace.PathTo("Styles", "app.css")));
+        var extra = new TaskItem(Path.Combine("Styles", "extra.css"));
+        extra.SetMetadata("OutputPath", Path.Combine("wwwroot", "css", "extra.css"));
+        var extraCss = workspace.PathTo("wwwroot", "css", "extra.css");
+
+        var both = CreateTask(workspace);
+        both.Compilations = [CreateItem(), extra];
+        Assert.True(both.Execute());
+        Assert.Empty(both.RemovedFiles);
+
+        var first = CreateTask(workspace);
+        Assert.True(first.Execute());
+        Assert.Equal([extraCss], first.RemovedFiles.Select(static file => file.ItemSpec));
+        Assert.False(File.Exists(extraCss));
+
+        var second = CreateTask(workspace);
+        Assert.True(second.Execute());
+        Assert.Equal([extraCss], second.RemovedFiles.Select(static file => file.ItemSpec));
+
+        var again = CreateTask(workspace);
+        again.Compilations = [CreateItem(), extra];
+        Assert.True(again.Execute());
+        Assert.Empty(again.RemovedFiles);
+        Assert.True(File.Exists(extraCss));
+    }
+
+    [Fact]
+    public void CompileTask_ReportsEveryRemovalBatchNotOnlyTheLast()
+    {
+        // Instances with different entry points can each remove something in the same build. The instance that
+        // compiles last must still hear about the first batch, or its glob keeps that deleted file as Content.
+        using var workspace = CreateWorkspace("compile-removal-batches");
+        TaskItem Entry(string name)
+        {
+            workspace.WriteFile($"Styles/{name}.css", File.ReadAllText(workspace.PathTo("Styles", "app.css")));
+            var item = new TaskItem(Path.Combine("Styles", $"{name}.css"));
+            item.SetMetadata("OutputPath", Path.Combine("wwwroot", "css", $"{name}.css"));
+            return item;
+        }
+
+        var extra = Entry("extra");
+        var third = Entry("third");
+        var extraCss = workspace.PathTo("wwwroot", "css", "extra.css");
+        var thirdCss = workspace.PathTo("wwwroot", "css", "third.css");
+
+        var all = CreateTask(workspace);
+        all.Compilations = [CreateItem(), extra, third];
+        Assert.True(all.Execute());
+
+        var dropsExtra = CreateTask(workspace);
+        dropsExtra.Compilations = [CreateItem(), third];
+        Assert.True(dropsExtra.Execute());
+        Assert.Equal([extraCss], dropsExtra.RemovedFiles.Select(static file => file.ItemSpec));
+
+        var dropsThird = CreateTask(workspace);
+        Assert.True(dropsThird.Execute());
+        Assert.Equal(
+            new[] { extraCss, thirdCss }.Order(StringComparer.OrdinalIgnoreCase),
+            dropsThird.RemovedFiles.Select(static file => file.ItemSpec).Order(StringComparer.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void CompileTask_ConcurrentRunsForOneProject_TakeTurns()
+    {
+        // One project built as two MSBuild instances in the same build - a ProjectReference passing its own
+        // global properties is enough - compiles twice. Overlapping, both processes write the same CSS and
+        // both read and rewrite the manifest that stale-output removal and clean depend on.
+        using var workspace = CreateWorkspace("compile-concurrent");
+        var tasks = new[] { CreateTask(workspace), CreateTask(workspace) };
+        var results = new bool[tasks.Length];
+        using var start = new Barrier(tasks.Length);
+
+        // Dedicated threads, as MSBuild nodes would be: the task blocks on its lock for the whole compilation.
+        var threads = tasks.Select((task, index) => new Thread(() =>
+        {
+            start.SignalAndWait();
+            results[index] = task.Execute();
+        })).ToArray();
+
+        foreach (var thread in threads)
+        {
+            thread.Start();
+        }
+
+        foreach (var thread in threads)
+        {
+            thread.Join();
+        }
+
+        Assert.All(results, Assert.True);
+
+        // Whichever run started its process second must have started it only after the first run had logged
+        // its last line - otherwise the two processes overlapped.
+        var runs = tasks
+            .Select(static task => (MockBuildEngine)task.BuildEngine)
+            .Select(static engine => (Engine: engine, Executing: engine.Messages.Single(static message =>
+                message.Message?.StartsWith("Executing: ", StringComparison.Ordinal) == true).Timestamp))
+            .OrderBy(static run => run.Executing)
+            .ToArray();
+        var lastLineOfFirstRun = runs[0].Engine.Messages.Max(static message => message.Timestamp);
+        Assert.True(
+            runs[1].Executing >= lastLineOfFirstRun,
+            $"The second compilation started at {runs[1].Executing:HH:mm:ss.fff}, before the first one finished at {lastLineOfFirstRun:HH:mm:ss.fff}.");
+
+        // Both started together and a compilation holds the lock for its whole run, so the second one queued
+        // rather than merely happening to start late.
+        Assert.Contains(runs[1].Engine.Messages, static message =>
+            message.Message?.Contains("Waiting for another build compiling Tailwind", StringComparison.Ordinal) == true);
+
+        Assert.Contains(".text-3xl", File.ReadAllText(workspace.PathTo("wwwroot", "css", "app.css")));
+    }
+
     private TempWorkspace CreateWorkspace(string name)
     {
         var workspace = TempWorkspace.Create(name);

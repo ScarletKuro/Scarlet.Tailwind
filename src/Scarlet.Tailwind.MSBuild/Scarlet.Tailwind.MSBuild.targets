@@ -42,6 +42,7 @@
   <Target Name="RunTailwindBeforeStaticWebAssets"
           BeforeTargets="DispatchToInnerBuilds;ResolveProjectStaticWebAssets;PreBuildEvent"
           DependsOnTargets="ResolveProjectReferences;_TailwindResolveManifestDirectory"
+          Returns="@(_TailwindContentChanges)"
           Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND '$(DesignTimeBuild)' != 'true' AND '$(NoBuild)' != 'true' AND ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == '')">
     <TailwindCompileTask Compilations="@(TailwindBeforeStaticWebAssets)"
                          ProjectDirectory="$(MSBuildProjectDirectory)"
@@ -65,13 +66,65 @@
       <Output TaskParameter="WatchInvocations" ItemName="_TailwindWatchInvocations" />
     </TailwindCompileTask>
 
+    <!-- The task reports removed files as absolute paths, but the SDK's wwwroot glob holds them project-relative,
+         and Remove inside a target matches item specs rather than resolved paths. Without the relative form the
+         glob's stale entry survives, and the static web assets SDK fails the build on a file that is gone. -->
     <ItemGroup>
-      <Content Remove="@(_TailwindRemovedFiles)" />
-      <None Remove="@(_TailwindRemovedFiles)" />
+      <_TailwindRemovedContent Include="$([MSBuild]::MakeRelative($([MSBuild]::EnsureTrailingSlash('$(MSBuildProjectDirectory)')), '%(_TailwindRemovedFiles.FullPath)'))"
+                               Condition="'@(_TailwindRemovedFiles)' != ''" />
+      <Content Remove="@(_TailwindRemovedFiles);@(_TailwindRemovedContent)" />
+      <None Remove="@(_TailwindRemovedFiles);@(_TailwindRemovedContent)" />
       <_TailwindGeneratedContent Include="%(_TailwindGeneratedFiles.RelativePath)" />
       <_TailwindNewContent Include="@(_TailwindGeneratedContent)" Exclude="@(Content)" />
       <Content Include="@(_TailwindNewContent)" CopyToPublishDirectory="PreserveNewest" />
       <FileWrites Include="@(_TailwindGeneratedFiles)" />
+      <_TailwindContentChanges Include="@(_TailwindGeneratedContent)" Change="Generated" />
+      <_TailwindContentChanges Include="@(_TailwindRemovedContent)" Change="Removed" />
+    </ItemGroup>
+  </Target>
+
+  <!-- An inner build is not always reached through this project's own outer build. A ProjectReference from an
+       app builds the referenced framework directly (dotnet run on the app never builds this project's outer
+       build), and so does dotnet build -f. Neither would ever compile. And a rebuild's Clean phase evaluates and
+       caches the inner builds before anything is compiled, so even when the outer build compiles first, Content
+       it registers there never reaches them.
+
+       So every inner build asks the outer build to compile, and applies what that compilation changed to its
+       own items. MSBuild runs a target once per project instance and hands every later caller its cached
+       Returns, so this compiles nothing when the outer build already compiled before dispatching, and compiles
+       exactly once when it did not, however many frameworks or referencing apps ask. Removing TargetFramework
+       is what addresses the outer instance: it is the only global property the outer build adds when it
+       dispatches.
+
+       Removed files matter as much as generated ones. This build evaluated its wwwroot glob before the
+       compilation deleted stale outputs, and the static web assets SDK fails on an asset whose file is gone.
+
+       No FileWrites here: the outer build owns these files, and an inner build's incremental clean would
+       otherwise delete outputs it believes are its own. TailwindClean removes them from the manifest instead.
+
+       A caller that reaches this project with different global properties (a ProjectReference with
+       AdditionalProperties, say) addresses a different outer instance, which compiles again. TailwindCompileTask
+       makes those compilations take turns.
+
+       The DesignTimeBuild guard is not what keeps the IDE from compiling: that global property reaches the outer
+       instance through this call, where RunTailwindBeforeStaticWebAssets already skips. It saves evaluating the
+       outer project on every design-time build. -->
+  <Target Name="_TailwindCompileFromInnerBuild"
+          BeforeTargets="ResolveProjectStaticWebAssets;PreBuildEvent"
+          Condition="'$(TailwindEnabled)' == 'true' AND '@(TailwindBeforeStaticWebAssets)' != '' AND '$(DesignTimeBuild)' != 'true' AND '$(NoBuild)' != 'true' AND '$(TargetFrameworks)' != '' AND '$(TargetFramework)' != ''">
+    <MSBuild Projects="$(MSBuildProjectFullPath)"
+             Targets="RunTailwindBeforeStaticWebAssets"
+             RemoveProperties="TargetFramework">
+      <Output TaskParameter="TargetOutputs" ItemName="_TailwindOuterContentChanges" />
+    </MSBuild>
+
+    <ItemGroup>
+      <_TailwindOuterRemovedFiles Include="@(_TailwindOuterContentChanges)" Condition="'%(_TailwindOuterContentChanges.Change)' == 'Removed'" />
+      <_TailwindOuterGeneratedContent Include="@(_TailwindOuterContentChanges)" Condition="'%(_TailwindOuterContentChanges.Change)' == 'Generated'" />
+      <Content Remove="@(_TailwindOuterRemovedFiles)" />
+      <None Remove="@(_TailwindOuterRemovedFiles)" />
+      <_TailwindOuterNewContent Include="@(_TailwindOuterGeneratedContent)" Exclude="@(Content)" />
+      <Content Include="%(_TailwindOuterNewContent.Identity)" CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
   </Target>
 
@@ -123,7 +176,7 @@
       <Output TaskParameter="Lines" ItemName="_TailwindFilesToClean" />
     </ReadLinesFromFile>
     <Delete Files="@(_TailwindFilesToClean)" Condition="'@(_TailwindFilesToClean)' != ''" />
-    <Delete Files="$(_TailwindManifestDirectory)/Tailwind.generated.txt"
+    <Delete Files="$(_TailwindManifestDirectory)/Tailwind.generated.txt;$(_TailwindManifestDirectory)/Tailwind.removed.txt"
             Condition="'$(_TailwindManifestDirectory)' != ''" />
   </Target>
 </Project>

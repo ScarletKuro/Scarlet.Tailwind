@@ -23,6 +23,11 @@ public sealed class TailwindCompileTask : Task
     private const int DiagnosticTailLineCount = 50;
     private const int OutputDrainGraceMilliseconds = 5000;
 
+    /// <summary>
+    /// Outputs compilations removed that are still gone, next to the manifest. TailwindClean deletes it too.
+    /// </summary>
+    internal const string RemovedRecordFileName = "Tailwind.removed.txt";
+
     [Required]
     public ITaskItem[] Compilations { get; set; } = Array.Empty<ITaskItem>();
 
@@ -111,11 +116,31 @@ public sealed class TailwindCompileTask : Task
                 return !Log.HasLoggedErrors;
             }
 
+            // Taken before the manifest is read: the stale-output removal below must see what the previous
+            // compilation of this project wrote, not race it.
+            using var runLock = TailwindRunLock.Acquire(
+                ProjectDirectory,
+                directory => Log.LogMessage(MessageImportance.High, $"Waiting for another build compiling Tailwind in {directory}..."));
+
             var manifestDirectory = ResolveManifestDirectory();
             var manifestPath = Path.Combine(manifestDirectory, "Tailwind.generated.txt");
+            var removedRecordPath = Path.Combine(manifestDirectory, RemovedRecordFileName);
             var expectedFiles = entries.SelectMany(static entry => entry.ExpectedOutputs).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
             var previousFiles = ReadManifest(fileSystem, manifestPath);
             var removedFiles = previousFiles.Except(expectedFiles, StringComparer.OrdinalIgnoreCase).ToArray();
+
+            // One project can be built as several instances in one build, each holding a wwwroot glob evaluated
+            // before any of them compiled. Only the first compilation finds the stale outputs in the manifest; the
+            // rest would report nothing removed and keep the deleted file as Content, which the static web assets
+            // SDK rejects. So removals are recorded, merged across compilations - instances with different entry
+            // points can each remove something - and every compilation reports whatever in the record is still gone
+            // and not produced again. Removing an item that is not there is harmless, so reporting it again on later
+            // builds costs nothing; an output that comes back drops out of the record.
+            var recordedRemovals = ReadManifest(fileSystem, removedRecordPath)
+                .Concat(removedFiles)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Except(expectedFiles, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
 
             foreach (var stale in removedFiles)
             {
@@ -150,8 +175,18 @@ public sealed class TailwindCompileTask : Task
             fileSystem.Directory.CreateDirectory(manifestDirectory);
             fileSystem.File.WriteAllLines(manifestPath, expectedFiles);
 
+            var stillRemoved = recordedRemovals.Where(path => !fileSystem.File.Exists(path)).ToArray();
+            if (stillRemoved.Length > 0)
+            {
+                fileSystem.File.WriteAllLines(removedRecordPath, stillRemoved);
+            }
+            else
+            {
+                fileSystem.File.TryDeleteFile(removedRecordPath);
+            }
+
             GeneratedFiles = expectedFiles.Select(CreateGeneratedFileItem).ToArray();
-            RemovedFiles = removedFiles.Select(static path => (ITaskItem)new TaskItem(path)).ToArray();
+            RemovedFiles = stillRemoved.Select(static path => (ITaskItem)new TaskItem(path)).ToArray();
 
             return !Log.HasLoggedErrors;
         }

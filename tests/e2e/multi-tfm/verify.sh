@@ -7,6 +7,10 @@ set -euo pipefail
 # Tailwind once in the outer build and skips every inner build. Without it a three-TFM Razor Class Library
 # runs Tailwind three times over the same wwwroot, with three processes writing the same file concurrently.
 #
+# Inner builds reached some other way ask the outer build to compile instead, so the script also covers the
+# two ways that happens: a rebuild, whose Clean phase evaluates the inner builds before anything is compiled,
+# and an app that references the library, whose build never runs the library's outer build at all.
+#
 # Usage: ./verify.sh <workspace-path> <package-version> <runtime-version>
 
 if [ $# -ne 3 ]; then
@@ -74,6 +78,12 @@ process_template() {
 TEST_DIR="/tmp/scarlet-tailwind-multi-tfm-$$"
 mkdir -p "$TEST_DIR"
 cd "$TEST_DIR"
+# Physical path from here on. On macOS /tmp is a symlink to /private/tmp, and a process started inside it sees
+# the resolved path as its current directory. Builds started from a project's own directory then record
+# /private/tmp paths, while a build addressing the same project through /tmp records the other spelling - and
+# the SDK's incremental clean treats the first set as orphans of the second and deletes them, including the
+# reference assembly a referencing app is about to compile against (CS0006).
+TEST_DIR="$(pwd -P)"
 
 export NUGET_PACKAGES="$TEST_DIR/nuget-packages"
 
@@ -174,6 +184,111 @@ if [ "$ASSET_COUNT" -eq 1 ]; then
 else
     echo "✗ Expected one packed copy of the generated CSS, found $ASSET_COUNT"
     unzip -l "$NUPKG"
+    FAILED=1
+fi
+
+# Counts the primary static web asset for app.css in a build manifest. Identity is the CSS file's path; the
+# compressed alternatives end in .gz", so they do not match.
+count_manifest_css() {
+    grep -oE '"Identity"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" | grep -Fc 'app.css"' || true
+}
+
+section "Rebuild after deleting the CSS"
+# A rebuild's Clean phase evaluates and caches the inner builds while the CSS is missing. Before inner builds
+# asked the outer build for the compilation's changes, Content registered in the outer build never reached
+# them: the manifests came out empty and pack --no-build shipped a package without its CSS.
+rm "$CSS"
+REBUILD_LOG="$TEST_DIR/rebuild.log"
+dotnet build --no-restore --no-incremental --configuration "$CONFIGURATION" --verbosity normal > "$REBUILD_LOG" 2>&1 || {
+    tail -n 40 "$REBUILD_LOG"
+    fatal "Rebuild failed"
+}
+
+INVOCATIONS="$(grep -c "Executing:" "$REBUILD_LOG" || true)"
+if [ "$INVOCATIONS" -eq 1 ]; then
+    echo "✓ The rebuild ran Tailwind exactly once"
+else
+    echo "✗ Expected the rebuild to run Tailwind once, it ran $INVOCATIONS times"
+    FAILED=1
+fi
+
+for tfm in net8.0 net9.0 net10.0; do
+    MATCHES="$(count_manifest_css "obj/$CONFIGURATION/$tfm/staticwebassets.build.json")"
+    if [ "$MATCHES" -eq 1 ]; then
+        echo "✓ $tfm static web assets manifest carries the CSS"
+    else
+        echo "✗ Expected the CSS once in the $tfm manifest, found $MATCHES"
+        FAILED=1
+    fi
+done
+
+dotnet pack --no-build --configuration "$CONFIGURATION" --output nupkg-rebuild --verbosity minimal || fatal "Pack after rebuild failed"
+REBUILD_NUPKG="$(find nupkg-rebuild -name '*.nupkg' | head -n 1)"
+ENTRIES="$(unzip -Z1 "$REBUILD_NUPKG" | grep -Fcx "staticwebassets/css/app.css" || true)"
+if [ "$ENTRIES" -eq 1 ] && [ "$(unzip -p "$REBUILD_NUPKG" staticwebassets/css/app.css | wc -c)" -gt 0 ]; then
+    echo "✓ pack --no-build after the rebuild carries the CSS once, non-empty"
+else
+    echo "✗ Expected exactly one non-empty staticwebassets/css/app.css after the rebuild, found $ENTRIES"
+    FAILED=1
+fi
+
+section "Building a referencing app on its own"
+# What dotnet run on an app does: its ProjectReference builds the library's net10.0 inner build directly and
+# never the library's outer build, so the inner build has to ask the outer one to compile. Before it did,
+# Tailwind never ran here and the app answered 404 for the library's CSS.
+RCL_DIR="$(pwd)"
+APP_DIR="$TEST_DIR/TestApp"
+mkdir -p "$APP_DIR"
+cp "$TEMPLATES_DIR/TestApp.csproj.template" "$APP_DIR/TestApp.csproj"
+cp "$TEMPLATES_DIR/Program.cs.template" "$APP_DIR/Program.cs"
+rm "$CSS"
+
+APP_BUILD_LOG="$TEST_DIR/app-build.log"
+dotnet build "$APP_DIR/TestApp.csproj" --configuration "$CONFIGURATION" --verbosity normal > "$APP_BUILD_LOG" 2>&1 || {
+    tail -n 40 "$APP_BUILD_LOG"
+    fatal "Building the referencing app failed"
+}
+echo "✓ Referencing app built"
+
+INVOCATIONS="$(grep -c "Executing:" "$APP_BUILD_LOG" || true)"
+if [ "$INVOCATIONS" -eq 1 ]; then
+    echo "✓ Building the app ran Tailwind exactly once"
+else
+    echo "✗ Expected building the app to run Tailwind once, it ran $INVOCATIONS times"
+    FAILED=1
+fi
+
+MATCHES="$(count_manifest_css "$APP_DIR/obj/$CONFIGURATION/net10.0/staticwebassets.build.json")"
+if [ "$MATCHES" -eq 1 ]; then
+    echo "✓ App manifest carries the library's CSS"
+else
+    echo "✗ Expected the library's CSS once in the app manifest, found $MATCHES"
+    FAILED=1
+fi
+
+# Serve it: the manifest is the means, the app answering for the CSS is the point. Development is the
+# environment in which an app serves referenced projects' static web assets straight from their wwwroot.
+APP_PORT=$((20000 + RANDOM % 10000))
+ASPNETCORE_ENVIRONMENT=Development dotnet "$APP_DIR/bin/$CONFIGURATION/net10.0/TestApp.dll" \
+    --urls "http://127.0.0.1:$APP_PORT" --contentRoot "$APP_DIR" > "$TEST_DIR/app-run.log" 2>&1 &
+APP_PID=$!
+CSS_URL="http://127.0.0.1:$APP_PORT/_content/TestRclMultiTfm/css/app.css"
+STATUS=000
+for _ in $(seq 1 60); do
+    STATUS="$(curl --silent --max-time 2 --output "$TEST_DIR/served.css" --write-out '%{http_code}' "$CSS_URL" || true)"
+    if [ "$STATUS" != "000" ]; then
+        break
+    fi
+    sleep 0.5
+done
+kill "$APP_PID" 2>/dev/null || true
+wait "$APP_PID" 2>/dev/null || true
+
+if [ "$STATUS" = "200" ] && cmp -s "$TEST_DIR/served.css" "$RCL_DIR/$CSS"; then
+    echo "✓ App serves the library's CSS at /_content/TestRclMultiTfm/css/app.css"
+else
+    echo "✗ App answered $STATUS for $CSS_URL, or served something other than the generated CSS"
+    tail -n 20 "$TEST_DIR/app-run.log" || true
     FAILED=1
 fi
 
