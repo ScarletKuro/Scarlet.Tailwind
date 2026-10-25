@@ -13,7 +13,12 @@ namespace Scarlet.Tailwind.MSBuild.IntegrationTests;
 /// <remarks>
 /// These install the packaged targets from a private feed rather than importing the development copy. The
 /// development copy depends on ResolveProjectReferences, which a multi-targeting outer build does not have.
+/// They run alone because they pack the task project's build output, which builds that import the development
+/// copy - every other static web assets test - rebuild through its ProjectReference. Packing while another test
+/// rewrites the DLL fails with NU5026.
 /// </remarks>
+[Collection(nameof(TailwindMultiTargetTests))]
+[CollectionDefinition(nameof(TailwindMultiTargetTests), DisableParallelization = true)]
 public class TailwindMultiTargetTests
 {
     private const string PackedVersion = "0.0.0-integration-test";

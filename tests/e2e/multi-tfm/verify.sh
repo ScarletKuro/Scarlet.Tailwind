@@ -78,6 +78,12 @@ process_template() {
 TEST_DIR="/tmp/scarlet-tailwind-multi-tfm-$$"
 mkdir -p "$TEST_DIR"
 cd "$TEST_DIR"
+# Physical path from here on. On macOS /tmp is a symlink to /private/tmp, and a process started inside it sees
+# the resolved path as its current directory. Builds started from a project's own directory then record
+# /private/tmp paths, while a build addressing the same project through /tmp records the other spelling - and
+# the SDK's incremental clean treats the first set as orphans of the second and deletes them, including the
+# reference assembly a referencing app is about to compile against (CS0006).
+TEST_DIR="$(pwd -P)"
 
 export NUGET_PACKAGES="$TEST_DIR/nuget-packages"
 
