@@ -41,8 +41,9 @@ jobs:
           )) {
             if (Test-Path $debugKey) {
               Get-ItemProperty -Path $debugKey | Out-String | Write-Host
+              $valueNames = (Get-Item -LiteralPath $debugKey).GetValueNames()
               foreach ($valueName in @('Debugger', 'Auto')) {
-                if ($null -ne (Get-ItemPropertyValue -Path $debugKey -Name $valueName -ErrorAction SilentlyContinue)) {
+                if ($valueNames -contains $valueName) {
                   Remove-ItemProperty -Path $debugKey -Name $valueName
                 }
               }
