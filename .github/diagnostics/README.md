@@ -4,11 +4,6 @@ The Windows ARM CI leg installs an Image File Execution Options (IFEO) debugger 
 before the build. Every real invocation, including ones from packed packages and concurrent projects,
 starts under ProcDump. No rerun is needed to reproduce the failing invocation.
 
-`Enable-TailwindCapture.ps1` first publishes a self-contained x64 probe and runs it through the same IFEO
-hook. Setup fails unless normal exit, exit 37, arguments with spaces, and a `0xC0000005` exception all
-behave as expected and the exception produces a dump. The probe's synthetic dumps are deleted after
-validation; its logs remain under `capture-self-test/`. This probe also exercises x64 emulation on ARM64.
-
 Each actual invocation gets its own directory in the `tailwind-crash-dumps-windows-11-arm` artifact:
 
 - `invocation.json`: executable, original argument vector, working directory and start time.

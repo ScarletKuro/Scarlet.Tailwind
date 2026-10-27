@@ -26,8 +26,7 @@ jobs:
         run: dotnet restore
 
       # IFEO starts every real Tailwind invocation under ProcDump, including concurrent builds and E2E.
-      # Setup proves x64 access-violation capture and target exit-code propagation before enabling the hook.
-      - name: Enable and verify Tailwind crash capture
+      - name: Enable Tailwind crash capture
         if: matrix.os == 'windows-11-arm'
         timeout-minutes: 5
         shell: pwsh
@@ -282,7 +281,6 @@ jobs:
           $dumps = @(Get-ChildItem -LiteralPath $dumpFolder -Filter '*.dmp' -Recurse)
           $dumps | Format-Table Name, Length, LastWriteTime
           Get-ChildItem -LiteralPath $dumpFolder -Filter 'exit-code.txt' -Recurse |
-            Where-Object FullName -NotMatch 'capture-self-test' |
             ForEach-Object { "$($_.Directory.Name): $(Get-Content -LiteralPath $_.FullName)" } |
             Out-File (Join-Path $dumpFolder 'invocation-exit-codes.txt') -Encoding utf8
           if ($dumps.Count -eq 0) { Write-Warning 'No Tailwind dump was captured. See the diagnostic artifact and ProcDump logs.' }

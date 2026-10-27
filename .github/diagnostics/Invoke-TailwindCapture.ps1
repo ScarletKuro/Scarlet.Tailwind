@@ -1,8 +1,14 @@
 # IFEO appends the original executable and its arguments to this script's command line.
-# Keep them in $args so Tailwind flags are not interpreted as PowerShell parameters.
+# Read the OS argument vector: PowerShell's -File binding splits flags such as --input=C:\app.css
+# at the colon before populating $args, even when the script declares no parameters.
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $false
-$targetArguments = @($args)
+$processArguments = [Environment]::GetCommandLineArgs()
+$fileIndex = [Array]::IndexOf($processArguments, '-File')
+if ($fileIndex -lt 0 -or $fileIndex + 2 -ge $processArguments.Length) {
+    throw 'Capture must be launched with -File <script> <executable> [arguments].'
+}
+$targetArguments = @($processArguments[($fileIndex + 2)..($processArguments.Length - 1)])
 $invocationDirectory = Join-Path $env:SCARLET_TAILWIND_DUMP_ROOT ("{0:yyyyMMddTHHmmssfff}-{1}" -f (Get-Date), $PID)
 New-Item -ItemType Directory -Path $invocationDirectory -Force | Out-Null
 $logPath = Join-Path $invocationDirectory 'procdump.log'
