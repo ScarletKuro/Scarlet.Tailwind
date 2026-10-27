@@ -25,40 +25,13 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
-      # Capture the standalone executable's intermittent access violations under Windows ARM emulation.
-      # WER finishes writing the dump before allowing the crashed process to terminate.
-      - name: Enable Tailwind crash dumps
+      # IFEO starts every real Tailwind invocation under ProcDump, including concurrent builds and E2E.
+      # Setup proves x64 access-violation capture and target exit-code propagation before enabling the hook.
+      - name: Enable and verify Tailwind crash capture
         if: matrix.os == 'windows-11-arm'
+        timeout-minutes: 5
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $dumpFolder = Join-Path $env:RUNNER_TEMP 'TailwindCrashDumps'
-          New-Item -ItemType Directory -Path $dumpFolder -Force | Out-Null
-          # Hosted Windows images install a dummy JIT debugger. Automatic debugging can bypass LocalDumps.
-          foreach ($debugKey in @(
-            'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\AeDebug',
-            'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows NT\CurrentVersion\AeDebug'
-          )) {
-            if (Test-Path $debugKey) {
-              Get-ItemProperty -Path $debugKey | Out-String | Write-Host
-              $valueNames = (Get-Item -LiteralPath $debugKey).GetValueNames()
-              foreach ($valueName in @('Debugger', 'Auto')) {
-                if ($valueNames -contains $valueName) {
-                  Remove-ItemProperty -Path $debugKey -Name $valueName
-                }
-              }
-            }
-          }
-          $werKey = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting'
-          New-ItemProperty -Path $werKey -Name DontShowUI -PropertyType DWord -Value 1 -Force | Out-Null
-          Set-Service WerSvc -StartupType Manual
-          Start-Service WerSvc
-          $dumpKey = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\tailwindcss.exe'
-          New-Item -Path $dumpKey -Force | Out-Null
-          New-ItemProperty -Path $dumpKey -Name DumpFolder -PropertyType ExpandString -Value $dumpFolder -Force | Out-Null
-          New-ItemProperty -Path $dumpKey -Name DumpType -PropertyType DWord -Value 2 -Force | Out-Null
-          New-ItemProperty -Path $dumpKey -Name DumpCount -PropertyType DWord -Value 5 -Force | Out-Null
-          Get-ItemProperty -Path $dumpKey
+        run: ./.github/diagnostics/Enable-TailwindCapture.ps1
 
       - name: Build
         run: dotnet build --no-restore --configuration Release
@@ -285,46 +258,20 @@ jobs:
           flags: ${{ matrix.os }}
           name: codecov-test-results-${{ matrix.os }}
 
-      # Preserve the original failure. ProcDump launches the sample's executable under a debugger so
-      # capture does not depend on WER being invoked. Reproduction is best-effort: the fault is intermittent.
-      - name: Reproduce Tailwind crash under ProcDump
-        if: ${{ failure() && matrix.os == 'windows-11-arm' }}
-        continue-on-error: true
-        timeout-minutes: 5
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $dumpFolder = Join-Path $env:RUNNER_TEMP 'TailwindCrashDumps'
-          if (Get-ChildItem -LiteralPath $dumpFolder -Filter '*.dmp') { exit 0 }
-          $tailwind = Join-Path $env:GITHUB_WORKSPACE 'src/Scarlet.Tailwind.MSBuild/bin/runtimes/win-x64/native/tailwindcss.exe'
-          if (-not (Test-Path -LiteralPath $tailwind)) {
-            Write-Warning 'The build did not stage the sample Tailwind executable; cannot reproduce.'
-            exit 0
-          }
-          $procDumpFolder = Join-Path $env:RUNNER_TEMP 'ProcDump'
-          $archive = Join-Path $env:RUNNER_TEMP 'ProcDump.zip'
-          Invoke-WebRequest 'https://download.sysinternals.com/files/Procdump.zip' -OutFile $archive
-          Expand-Archive -LiteralPath $archive -DestinationPath $procDumpFolder -Force
-          $procDump = Join-Path $procDumpFolder 'procdump64a.exe'
-          $sample = Join-Path $env:GITHUB_WORKSPACE 'samples/Scarlet.Tailwind.Sample'
-          Set-Location $sample
-          # Use a separate output so reproduction does not overwrite the failed build's CSS.
-          for ($attempt = 1; $attempt -le 10; $attempt++) {
-            Write-Host "ProcDump reproduction attempt $attempt/10"
-            & $procDump -accepteula -ma -e -x $dumpFolder $tailwind --minify "--cwd=$sample" `
-              "--input=$sample/Styles/app.css" "--output=$dumpFolder/reproduction.css" 2>&1 |
-              Tee-Object -FilePath (Join-Path $dumpFolder "procdump-$attempt.log")
-            if (Get-ChildItem -LiteralPath $dumpFolder -Filter '*.dmp') { break }
-          }
-          # ProcDump's exit code must not replace the original build/test result.
-          exit 0
-
       - name: Collect Tailwind crash diagnostics
         if: ${{ always() && matrix.os == 'windows-11-arm' }}
         shell: pwsh
         run: |
           $dumpFolder = Join-Path $env:RUNNER_TEMP 'TailwindCrashDumps'
           New-Item -ItemType Directory -Path $dumpFolder -Force | Out-Null
+          # Remove the launch hook after the last test, including on failure.
+          $captureKey = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\tailwindcss.exe'
+          if (Test-Path $captureKey) {
+            if ((Get-Item -LiteralPath $captureKey).GetValueNames() -contains 'Debugger') {
+              Remove-ItemProperty -LiteralPath $captureKey -Name Debugger
+            }
+          }
+          dotnet --info | Out-File (Join-Path $dumpFolder 'dotnet-info.txt') -Encoding utf8
           Get-Service WerSvc | Format-List * | Out-File (Join-Path $dumpFolder 'wer-service.txt')
           Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting' |
             Format-List * | Out-File (Join-Path $dumpFolder 'wer-settings.txt')
@@ -332,11 +279,15 @@ jobs:
             -ErrorAction SilentlyContinue | Where-Object Message -Match 'tailwindcss' |
             Format-List TimeCreated, Id, ProviderName, Message |
             Out-File (Join-Path $dumpFolder 'tailwind-crash-events.txt')
-          $dumps = @(Get-ChildItem -LiteralPath $dumpFolder -Filter '*.dmp')
+          $dumps = @(Get-ChildItem -LiteralPath $dumpFolder -Filter '*.dmp' -Recurse)
           $dumps | Format-Table Name, Length, LastWriteTime
+          Get-ChildItem -LiteralPath $dumpFolder -Filter 'exit-code.txt' -Recurse |
+            Where-Object FullName -NotMatch 'capture-self-test' |
+            ForEach-Object { "$($_.Directory.Name): $(Get-Content -LiteralPath $_.FullName)" } |
+            Out-File (Join-Path $dumpFolder 'invocation-exit-codes.txt') -Encoding utf8
           if ($dumps.Count -eq 0) { Write-Warning 'No Tailwind dump was captured. See the diagnostic artifact and ProcDump logs.' }
 
-      # Keep this after every Tailwind invocation, including E2E tests and diagnostic reproduction.
+      # Keep this after every Tailwind invocation, including E2E tests.
       - name: Upload Tailwind crash dumps
         if: ${{ always() && matrix.os == 'windows-11-arm' }}
         uses: actions/upload-artifact@v7
