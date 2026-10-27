@@ -25,6 +25,21 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore
 
+      # Capture the standalone executable's intermittent access violations under Windows ARM emulation.
+      # WER finishes writing the dump before allowing the crashed process to terminate.
+      - name: Enable Tailwind crash dumps
+        if: matrix.os == 'windows-11-arm'
+        shell: pwsh
+        run: |
+          $dumpFolder = Join-Path $env:RUNNER_TEMP 'TailwindCrashDumps'
+          New-Item -ItemType Directory -Path $dumpFolder -Force | Out-Null
+          $dumpKey = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps\tailwindcss.exe'
+          New-Item -Path $dumpKey -Force | Out-Null
+          New-ItemProperty -Path $dumpKey -Name DumpFolder -PropertyType ExpandString -Value $dumpFolder -Force | Out-Null
+          New-ItemProperty -Path $dumpKey -Name DumpType -PropertyType DWord -Value 2 -Force | Out-Null
+          New-ItemProperty -Path $dumpKey -Name DumpCount -PropertyType DWord -Value 5 -Force | Out-Null
+          Get-ItemProperty -Path $dumpKey
+
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
@@ -249,6 +264,17 @@ jobs:
           fail_ci_if_error: false
           flags: ${{ matrix.os }}
           name: codecov-test-results-${{ matrix.os }}
+
+      # Keep this after every Tailwind invocation, including E2E tests, and upload even if a build/test failed.
+      - name: Upload Tailwind crash dumps
+        if: ${{ always() && matrix.os == 'windows-11-arm' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: tailwind-crash-dumps-${{ matrix.os }}
+          path: ${{ runner.temp }}/TailwindCrashDumps/*.dmp
+          if-no-files-found: ignore
+          retention-days: 7
+          compression-level: 0
 
   # No GitHub-hosted runner offers musl/Alpine natively, unlike every other platform above which runs on
   # its own native OS. This runs inside a musl-based .NET SDK container on top of a regular Linux runner
