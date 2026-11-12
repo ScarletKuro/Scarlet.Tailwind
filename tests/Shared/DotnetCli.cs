@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Text;
 
 namespace Scarlet.Tailwind.Testing;
 
@@ -9,6 +10,8 @@ namespace Scarlet.Tailwind.Testing;
 /// </summary>
 internal static class DotnetCli
 {
+    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromMinutes(5);
+
     /// <summary>
     /// The configuration this test assembly was built in.
     /// </summary>
@@ -21,11 +24,20 @@ internal static class DotnetCli
     public static string Configuration { get; } =
         typeof(DotnetCli).Assembly.GetCustomAttribute<AssemblyConfigurationAttribute>()?.Configuration ?? "Debug";
 
+    /// <remarks>
+    /// The timeout covers the output as well as the exit. A pipe only reaches end-of-file once every process
+    /// holding its write end has gone, and <c>dotnet</c> hands its handles to the processes it starts - an
+    /// MSBuild task host left behind after a failed connection is enough. Waiting for the exit alone, a test
+    /// then hangs on the read indefinitely instead of failing after five minutes.
+    /// </remarks>
     public static async Task<DotnetResult> Run(
         string workingDirectory,
         string arguments,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        TimeSpan? timeoutOverride = null)
     {
+        var limit = timeoutOverride ?? DefaultTimeout;
+
         var startInfo = new ProcessStartInfo("dotnet", arguments)
         {
             WorkingDirectory = workingDirectory,
@@ -42,39 +54,70 @@ internal static class DotnetCli
 
         using var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Failed to start dotnet.");
 
-        var standardOutput = process.StandardOutput.ReadToEndAsync(cancellationToken);
-        var standardError = process.StandardError.ReadToEndAsync(cancellationToken);
+        // Collected incrementally rather than with ReadToEndAsync, so a timeout can still report what was written.
+        var standardOutput = new StringBuilder();
+        var standardError = new StringBuilder();
+        var readers = Task.WhenAll(
+            Collect(process.StandardOutput, standardOutput),
+            Collect(process.StandardError, standardError));
 
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeout.CancelAfter(TimeSpan.FromMinutes(5));
+        timeout.CancelAfter(limit);
 
         try
         {
             await process.WaitForExitAsync(timeout.Token);
+            await readers.WaitAsync(timeout.Token);
         }
         catch (OperationCanceledException)
         {
-            process.Kill(entireProcessTree: true);
+            var exited = process.HasExited;
+            KillTree(process);
 
-            // Await the readers before reporting: the output captured up to the kill is the only clue as to
-            // where the build hung, and abandoning the tasks would discard it.
+            // The readers may never finish - whatever holds the pipe can outlive the kill - so they are abandoned,
+            // and the output captured so far is the only clue as to where the build hung.
             throw new TimeoutException(
-                $"'dotnet {arguments}' did not finish within five minutes.{Environment.NewLine}" +
-                await DrainAsync(standardOutput, standardError));
+                (exited
+                    ? $"'dotnet {arguments}' exited, but its output was still open after {limit}; " +
+                      "a process it started is probably still holding the pipe."
+                    : $"'dotnet {arguments}' did not finish within {limit}.") +
+                Environment.NewLine + Snapshot(standardOutput) + Environment.NewLine + Snapshot(standardError));
         }
 
-        return new DotnetResult(process.ExitCode, await standardOutput, await standardError);
+        return new DotnetResult(process.ExitCode, Snapshot(standardOutput), Snapshot(standardError));
     }
 
-    private static async Task<string> DrainAsync(Task<string> standardOutput, Task<string> standardError)
+    private static async Task Collect(StreamReader reader, StringBuilder target)
+    {
+        var buffer = new char[4096];
+        int read;
+
+        while ((read = await reader.ReadAsync(buffer)) > 0)
+        {
+            lock (target)
+            {
+                target.Append(buffer, 0, read);
+            }
+        }
+    }
+
+    private static string Snapshot(StringBuilder source)
+    {
+        lock (source)
+        {
+            return source.ToString();
+        }
+    }
+
+    private static void KillTree(Process process)
     {
         try
         {
-            return $"{await standardOutput}{Environment.NewLine}{await standardError}";
+            process.Kill(entireProcessTree: true);
         }
-        catch
+        catch (Exception exception) when (exception is InvalidOperationException or System.ComponentModel.Win32Exception)
         {
-            return "(no output was captured before the process was killed)";
+            // Already gone, or a descendant exited mid-walk. Nothing more this method can do either way.
         }
     }
 }
