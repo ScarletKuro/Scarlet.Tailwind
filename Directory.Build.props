@@ -1,7 +1,7 @@
 <Project>
   <PropertyGroup>
     <!-- Tailwind CSS version used across all runtime packages -->
-    <TailwindVersion>4.3.3</TailwindVersion>
+    <TailwindVersion>4.3.5</TailwindVersion>
 
     <!-- Revision of Scarlet.Tailwind.Cli within a single TailwindVersion. The CLI package version is
          $(TailwindVersion).$(TailwindCliRevision), and NuGet normalises a trailing zero away, so revision 0
@@ -11,6 +11,6 @@
          0 whenever TailwindVersion changes. It lives here, next to TailwindVersion, because the alternative
          is discovering at release time that the deploy silently dropped your fix - the push skips
          duplicates, so a rebuilt package at an unchanged version never reaches the feed. -->
-    <TailwindCliRevision>1</TailwindCliRevision>
+    <TailwindCliRevision>0</TailwindCliRevision>
   </PropertyGroup>
 </Project>
