@@ -178,6 +178,12 @@ tool already needs a .NET install.
 **The embedded binary must be chmod'd at run time.** NuGet packages carry no Unix permission bits, so it is
 extracted `0644` and fails with `EACCES` on first use on Linux and macOS.
 
+**On Windows the CLI joins a kill-on-close job object (`WindowsJobObject`)** so that forcibly terminating
+it also terminates Tailwind. Both launchers join it immediately before starting Tailwind and never earlier:
+`dotnet tailwind watch` first runs `dotnet msbuild`, and MSBuild nodes or build servers started from inside
+the job would be killed when the tool exits, possibly in the middle of another build.
+`WindowsJobObjectTests` force-kills the real tool and fails if its child survives.
+
 **`dotnet tailwind watch` is a contract between two separately shipped packages.** The CLI runs
 `dotnet msbuild -getTargetResult:ResolveTailwindWatchConfiguration` and reads the item metadata that
 `TailwindCompileTask` emits in `ConfigurationOnly` mode. Any CLI version may meet any MSBuild package version
