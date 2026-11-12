@@ -236,6 +236,24 @@ Design-time builds in the IDE never compile. If one project is built twice in th
 global properties (a `ProjectReference` with `AdditionalProperties`, for example), the two compilations take
 turns rather than writing the same files at once.
 
+### Projects without static web assets
+
+Compilation works the same in a plain `Microsoft.NET.Sdk` project, but there the generated CSS is **not** added
+to the build as `Content`. Only the static web assets SDK (Razor, Web, Blazor WebAssembly) turns it into a static
+web asset; in any other project plain `Content` would be packed by NuGet under `content/` and `contentFiles/`,
+and so copied into every project that installs your package.
+
+This is controlled by the `TailwindDiscoverStaticWebAssets` property. It defaults to `true` when the project uses
+static web assets - the static web assets SDK from .NET 8 (`$(UsingMicrosoftNETSdkStaticWebAssets)`), or the
+Razor SDK that carries them in .NET 6 and 7 (`$(UsingMicrosoftNETSdkRazor)`) - and `false` otherwise. Set it
+explicitly to override. A plain app that wants the CSS in its publish output can list it the usual way:
+
+```xml
+<ItemGroup>
+  <Content Include="wwwroot\css\app.css" CopyToPublishDirectory="PreserveNewest" />
+</ItemGroup>
+```
+
 ## Writing Your Entry Stylesheet
 
 **Read this section even if you know Tailwind.** In v4 the stylesheet *is* the configuration, and what ends

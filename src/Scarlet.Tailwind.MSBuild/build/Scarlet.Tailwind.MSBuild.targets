@@ -5,6 +5,21 @@
   <!-- A target, not a file-scope PropertyGroup: $(IntermediateOutputPath) is not set when this file is
        imported, only by the time a target runs. Both entry points below depend on this one rather than
        duplicating the logic, so they cannot answer differently about where the manifest lives. -->
+  <!-- Whether generated files are handed back to the build as Content. Only the static web assets SDK (Razor,
+       Web, Blazor WebAssembly) turns that Content into static web assets; in any other project it is plain
+       Content, which NuGet packs under content/ and contentFiles/ and so copies into every consuming project.
+       So the default follows the SDK. Compilation runs the same either way. Set the property to override.
+       Computed in the targets rather than the props: the SDK sets these markers in its own props, which are not
+       guaranteed to be imported before this package's.
+       UsingMicrosoftNETSdkStaticWebAssets marks the standalone static web assets SDK, which only exists from
+       .NET 8. The .NET 6 and 7 SDKs build static web assets into the Razor SDK and set only
+       UsingMicrosoftNETSdkRazor - which Web and Blazor WebAssembly projects get too, because their SDKs import
+       Razor. -->
+  <PropertyGroup>
+    <TailwindDiscoverStaticWebAssets Condition="'$(TailwindDiscoverStaticWebAssets)' == '' AND ('$(UsingMicrosoftNETSdkStaticWebAssets)' == 'true' OR '$(UsingMicrosoftNETSdkRazor)' == 'true')">true</TailwindDiscoverStaticWebAssets>
+    <TailwindDiscoverStaticWebAssets Condition="'$(TailwindDiscoverStaticWebAssets)' == ''">false</TailwindDiscoverStaticWebAssets>
+  </PropertyGroup>
+
   <Target Name="_TailwindResolveManifestDirectory">
     <PropertyGroup>
       <_TailwindManifestDirectory Condition="'$(TailwindManifestDirectory)' != ''">$(TailwindManifestDirectory)</_TailwindManifestDirectory>
@@ -59,7 +74,7 @@
       <None Remove="@(_TailwindRemovedFiles);@(_TailwindRemovedContent)" />
       <_TailwindGeneratedContent Include="%(_TailwindGeneratedFiles.RelativePath)" />
       <_TailwindNewContent Include="@(_TailwindGeneratedContent)" Exclude="@(Content)" />
-      <Content Include="@(_TailwindNewContent)" CopyToPublishDirectory="PreserveNewest" />
+      <Content Include="@(_TailwindNewContent)" CopyToPublishDirectory="PreserveNewest" Condition="'$(TailwindDiscoverStaticWebAssets)' == 'true'" />
       <FileWrites Include="@(_TailwindGeneratedFiles)" />
       <_TailwindContentChanges Include="@(_TailwindGeneratedContent)" Change="Generated" />
       <_TailwindContentChanges Include="@(_TailwindRemovedContent)" Change="Removed" />
@@ -107,7 +122,7 @@
       <Content Remove="@(_TailwindOuterRemovedFiles)" />
       <None Remove="@(_TailwindOuterRemovedFiles)" />
       <_TailwindOuterNewContent Include="@(_TailwindOuterGeneratedContent)" Exclude="@(Content)" />
-      <Content Include="%(_TailwindOuterNewContent.Identity)" CopyToPublishDirectory="PreserveNewest" />
+      <Content Include="%(_TailwindOuterNewContent.Identity)" CopyToPublishDirectory="PreserveNewest" Condition="'$(TailwindDiscoverStaticWebAssets)' == 'true'" />
     </ItemGroup>
   </Target>
 
