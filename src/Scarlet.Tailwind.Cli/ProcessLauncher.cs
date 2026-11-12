@@ -50,6 +50,9 @@ internal sealed class ProcessLauncher : IProcessLauncher
         using var process = new Process();
         process.StartInfo = startInfo;
 
+        // On Windows, a forcibly terminated wrapper must not leave Tailwind running.
+        WindowsJobObject.KillChildrenOnExit();
+
         // Shared with Scarlet.Tailwind.MSBuild.TailwindCompileTask: both exec a Tailwind binary that may have just been
         // downloaded, or just been run, by a step moments earlier, and can race the same ETXTBSY window.
         ProcessStartRetry.Start(process, _log);

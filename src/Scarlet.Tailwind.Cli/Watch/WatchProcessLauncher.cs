@@ -18,6 +18,10 @@ internal sealed class WatchProcessLauncher : IWatchProcessLauncher
     {
         var processes = new List<Process>();
 
+        // Only now, after the MSBuild query has finished: its build nodes must stay outside the job. On
+        // Windows, a forcibly terminated wrapper then takes every watcher down with it.
+        WindowsJobObject.KillChildrenOnExit();
+
         try
         {
             foreach (var invocation in invocations)
