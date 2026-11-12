@@ -21,6 +21,9 @@ Node.js, npm, or `node_modules` required.
 Raw CLI invocations and build integration work independently. When both packages are installed,
 `dotnet tailwind watch` intentionally bridges them by reading the project's evaluated MSBuild configuration.
 
+Building this repository and running its samples and tests requires the .NET 11 SDK.
+The CLI package targets .NET 10; install that runtime too when testing the packaged tool.
+
 ### Scarlet.Tailwind.MSBuild — Tailwind during `dotnet build`
 
 ```bash

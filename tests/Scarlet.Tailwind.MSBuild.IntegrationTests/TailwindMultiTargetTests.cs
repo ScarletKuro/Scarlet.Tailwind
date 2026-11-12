@@ -26,7 +26,7 @@ public class TailwindMultiTargetTests : IClassFixture<PackedTargetsFixture>
     private static readonly string RuntimeDirectory =
         Path.Combine(RepositoryRoot.Path, "src", "Scarlet.Tailwind.MSBuild", "bin", "runtimes");
 
-    private static readonly string[] LibraryFrameworks = ["net8.0", "net9.0", "net10.0"];
+    private static readonly string[] LibraryFrameworks = ["net8.0", "net9.0", "net10.0", "net11.0"];
 
     private const string AppCss = """
         <TailwindBeforeStaticWebAssets Include="Styles/app.css">
@@ -89,15 +89,15 @@ public class TailwindMultiTargetTests : IClassFixture<PackedTargetsFixture>
 
         // Only the app is built, as dotnet run does.
         Assert.Equal(1, await RunAndCountCompilations(workspace,
-            $"build App10/App10.csproj -c {DotnetCli.Configuration} --no-restore -v:n"));
-        await AssertManifestHasAsset(AppManifest(workspace, "App10", "net10.0"), "css/app.css");
+            $"build App11/App11.csproj -c {DotnetCli.Configuration} --no-restore -v:n"));
+        await AssertManifestHasAsset(AppManifest(workspace, "App11", "net11.0"), "css/app.css");
 
-        // The whole solution: the library's outer build, three inner builds and two apps all reach the
+        // The whole solution: the library's outer build, four inner builds and two apps all reach the
         // compilation, and between them must run it once.
         DeleteGeneratedCss(workspace);
         Assert.Equal(1, await RunAndCountCompilations(workspace,
             $"build Apps.slnx -c {DotnetCli.Configuration} --no-restore -v:n"));
-        await AssertManifestHasAsset(AppManifest(workspace, "App10", "net10.0"), "css/app.css");
+        await AssertManifestHasAsset(AppManifest(workspace, "App11", "net11.0"), "css/app.css");
         await AssertManifestHasAsset(AppManifest(workspace, "App8", "net8.0"), "css/app.css");
         foreach (var tfm in LibraryFrameworks)
             await AssertManifestHasAsset(LibraryManifest(workspace, tfm), "css/app.css");
@@ -121,12 +121,12 @@ public class TailwindMultiTargetTests : IClassFixture<PackedTargetsFixture>
         workspace.WriteFile($"{Library}/{Library}.csproj", LibraryProject(AppCss));
 
         var appBuild = await RunDotnet(workspace,
-            $"build App10/App10.csproj -c {DotnetCli.Configuration} --no-restore -v:n");
+            $"build App11/App11.csproj -c {DotnetCli.Configuration} --no-restore -v:n");
         Assert.Equal(0, appBuild.ExitCode);
         Assert.Equal(1, CountCompilations(appBuild));
         Assert.False(File.Exists(LibraryPath(workspace, "wwwroot", "css", "extra.css")));
-        await AssertManifestHasAsset(AppManifest(workspace, "App10", "net10.0"), "css/app.css");
-        await AssertManifestLacksAsset(AppManifest(workspace, "App10", "net10.0"), "css/extra.css");
+        await AssertManifestHasAsset(AppManifest(workspace, "App11", "net11.0"), "css/app.css");
+        await AssertManifestLacksAsset(AppManifest(workspace, "App11", "net11.0"), "css/extra.css");
     }
 
     /// <summary>
@@ -143,7 +143,7 @@ public class TailwindMultiTargetTests : IClassFixture<PackedTargetsFixture>
         Assert.True(File.Exists(LibraryPath(workspace, "wwwroot", "css", "extra.css")));
 
         workspace.WriteFile($"{Library}/{Library}.csproj", LibraryProject(AppCss));
-        workspace.WriteFile("TwoInstances.proj", TwoInstancesDriver($"{Library}/{Library}.csproj", "TargetFramework=net10.0;"));
+        workspace.WriteFile("TwoInstances.proj", TwoInstancesDriver($"{Library}/{Library}.csproj", "TargetFramework=net11.0;"));
 
         var build = await RunDotnet(workspace, $"msbuild TwoInstances.proj -p:Configuration={DotnetCli.Configuration} -v:n");
 
@@ -222,7 +222,7 @@ public class TailwindMultiTargetTests : IClassFixture<PackedTargetsFixture>
             workspace.WriteFile($"{Library}/Pages/Index.cshtml", "<h1 class=\"text-3xl font-bold\">Hello</h1>");
             workspace.WriteFile($"{Library}/{Library}.csproj", LibraryProject(compilations));
 
-            foreach (var (app, tfm) in new[] { ("App10", "net10.0"), ("App8", "net8.0") })
+            foreach (var (app, tfm) in new[] { ("App11", "net11.0"), ("App8", "net8.0") })
             {
                 workspace.WriteFile($"{app}/{app}.csproj", $"""
                     <Project Sdk="Microsoft.NET.Sdk.Web">
@@ -238,7 +238,7 @@ public class TailwindMultiTargetTests : IClassFixture<PackedTargetsFixture>
 
             Assert.Equal(0, (await RunDotnet(workspace, "new sln -n Apps")).ExitCode);
             Assert.Equal(0, (await RunDotnet(workspace,
-                $"sln add {Library}/{Library}.csproj App10/App10.csproj App8/App8.csproj")).ExitCode);
+                $"sln add {Library}/{Library}.csproj App11/App11.csproj App8/App8.csproj")).ExitCode);
             Assert.Equal(0, (await RunDotnet(workspace, "restore Apps.slnx")).ExitCode);
 
             return workspace;
