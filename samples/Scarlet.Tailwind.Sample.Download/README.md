@@ -3,10 +3,14 @@
 Sample ASP.NET Core app that uses `TailwindRuntimeDownload=true` instead of referencing a platform runtime
 package.
 
+The sample itself sets `TailwindVersionDownload` to `$(TailwindVersion)`, the version this repository pins in
+`Directory.Build.props`, so it always builds against the Tailwind the packages ship. In your own project, write
+the version out as below.
+
 ```xml
 <PropertyGroup>
   <TailwindRuntimeDownload>true</TailwindRuntimeDownload>
-  <TailwindVersionDownload>4.3.3</TailwindVersionDownload>
+  <TailwindVersionDownload>4.3.5</TailwindVersionDownload>
   <TailwindRuntimeDirectory>$(MSBuildProjectDirectory)/runtimes</TailwindRuntimeDirectory>
 </PropertyGroup>
 ```

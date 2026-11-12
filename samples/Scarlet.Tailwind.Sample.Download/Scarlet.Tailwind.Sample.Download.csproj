@@ -10,7 +10,9 @@
     <!-- Enable Tailwind runtime download mode: no Scarlet.Tailwind.Runtime.* package is referenced, and the
          binary is fetched once and cached under TailwindRuntimeDirectory. -->
     <TailwindRuntimeDownload>true</TailwindRuntimeDownload>
-    <TailwindVersionDownload>4.3.3</TailwindVersionDownload>
+    <!-- The repository's pinned Tailwind, from Directory.Build.props, so the sample tracks every Tailwind bump.
+         In your own project, write the version out: <TailwindVersionDownload>4.3.5</TailwindVersionDownload> -->
+    <TailwindVersionDownload>$(TailwindVersion)</TailwindVersionDownload>
     <TailwindRuntimeDirectory>$(MSBuildProjectDirectory)/runtimes</TailwindRuntimeDirectory>
   </PropertyGroup>
 
