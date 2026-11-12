@@ -42,7 +42,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          # SDK 11 builds everything; .NET 10 runs the packaged net10.0 CLI in E2E tests.
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Restore dependencies
         run: dotnet restore
@@ -51,6 +54,10 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Run tests with coverage
+        # VSTest uses x64 directory-open flags on Linux ARM64 (microsoft/vstest#16653).
+        # Skip attachment post-processing there; test execution and report generation stay enabled.
+        env:
+          VSTEST_DISABLE_ARTIFACTS_POSTPROCESSING: ${{ matrix.os == 'ubuntu-24.04-arm' && '1' || '0' }}
         run: dotnet test --no-build --configuration Release --collect:"XPlat Code Coverage" --results-directory ./coverage
 
   # No GitHub-hosted runner offers musl/Alpine natively, unlike every other platform above which runs on
@@ -60,7 +67,7 @@ jobs:
     name: Test on Linux musl / Alpine (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
     container:
-      image: mcr.microsoft.com/dotnet/sdk:10.0-alpine
+      image: mcr.microsoft.com/dotnet/sdk:11.0-alpine
     permissions:
       contents: read
     strategy:
@@ -75,6 +82,12 @@ jobs:
     steps:
       - name: Install build prerequisites
         run: apk add --no-cache bash curl unzip icu-libs git
+
+      # Keep the shipping net10.0 CLI runnable while building and testing with SDK 11.
+      - name: Install .NET 10 runtime for CLI verification
+        run: |
+          curl -fsSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 10.0 --runtime dotnet --install-dir /usr/share/dotnet --no-path
 
       # actions/checkout is a JS action, and the runner's bundled Node build for Alpine containers only
       # covers x64 - on the arm64 leg it fails with "JavaScript Actions in Alpine containers are only
@@ -94,6 +107,10 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Run tests
+        # VSTest uses x64 directory-open flags on Linux ARM64 (microsoft/vstest#16653).
+        # Skip attachment post-processing there; test execution and report generation stay enabled.
+        env:
+          VSTEST_DISABLE_ARTIFACTS_POSTPROCESSING: ${{ matrix.arch == 'arm64' && '1' || '0' }}
         run: dotnet test --no-build --configuration Release
 
       - name: Pack NuGet packages
@@ -172,7 +189,10 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '10.0.x'
+          # SDK 11 builds everything; .NET 10 runs the packaged net10.0 CLI in E2E tests.
+          dotnet-version: |
+            10.0.x
+            11.0.x
 
       - name: Resolve release target
         id: release_target

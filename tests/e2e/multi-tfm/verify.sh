@@ -4,8 +4,8 @@ set -euo pipefail
 # End-to-end test for multi-targeted projects.
 #
 # The target's condition ends with ('$(TargetFrameworks)' == '' OR '$(TargetFramework)' == ''), which runs
-# Tailwind once in the outer build and skips every inner build. Without it a three-TFM Razor Class Library
-# runs Tailwind three times over the same wwwroot, with three processes writing the same file concurrently.
+# Tailwind once in the outer build and skips every inner build. Without it a four-TFM Razor Class Library
+# runs Tailwind four times over the same wwwroot, with four processes writing the same file concurrently.
 #
 # Inner builds reached some other way ask the outer build to compile instead, so the script also covers the
 # two ways that happens: a rebuild, whose Clean phase evaluates the inner builds before anything is compiled,
@@ -108,7 +108,7 @@ cd TestRclMultiTfm
 echo "✓ Created Razor Class Library"
 
 process_template "$TEMPLATES_DIR/TestRclMultiTfm.csproj.template" "TestRclMultiTfm.csproj"
-echo "✓ Updated project file with three target frameworks and the Tailwind package references"
+echo "✓ Updated project file with four target frameworks and the Tailwind package references"
 
 mkdir -p Styles
 cp "$TEMPLATES_DIR/app.css.template" "Styles/app.css"
@@ -176,7 +176,7 @@ if [ -z "$NUPKG" ]; then
     fatal "No package was produced"
 fi
 
-# One wwwroot shared by three TFMs means exactly one packed copy; more than one would mean the inner builds
+# One wwwroot shared by four TFMs means exactly one packed copy; more than one would mean the inner builds
 # each contributed their own.
 ASSET_COUNT="$(unzip -l "$NUPKG" | grep -c "staticwebassets/css/app.css" || true)"
 if [ "$ASSET_COUNT" -eq 1 ]; then
@@ -212,7 +212,7 @@ else
     FAILED=1
 fi
 
-for tfm in net8.0 net9.0 net10.0; do
+for tfm in net8.0 net9.0 net10.0 net11.0; do
     MATCHES="$(count_manifest_css "obj/$CONFIGURATION/$tfm/staticwebassets.build.json")"
     if [ "$MATCHES" -eq 1 ]; then
         echo "✓ $tfm static web assets manifest carries the CSS"
@@ -233,7 +233,7 @@ else
 fi
 
 section "Building a referencing app on its own"
-# What dotnet run on an app does: its ProjectReference builds the library's net10.0 inner build directly and
+# What dotnet run on an app does: its ProjectReference builds the library's net11.0 inner build directly and
 # never the library's outer build, so the inner build has to ask the outer one to compile. Before it did,
 # Tailwind never ran here and the app answered 404 for the library's CSS.
 RCL_DIR="$(pwd)"
@@ -258,7 +258,7 @@ else
     FAILED=1
 fi
 
-MATCHES="$(count_manifest_css "$APP_DIR/obj/$CONFIGURATION/net10.0/staticwebassets.build.json")"
+MATCHES="$(count_manifest_css "$APP_DIR/obj/$CONFIGURATION/net11.0/staticwebassets.build.json")"
 if [ "$MATCHES" -eq 1 ]; then
     echo "✓ App manifest carries the library's CSS"
 else
@@ -269,7 +269,7 @@ fi
 # Serve it: the manifest is the means, the app answering for the CSS is the point. Development is the
 # environment in which an app serves referenced projects' static web assets straight from their wwwroot.
 APP_PORT=$((20000 + RANDOM % 10000))
-ASPNETCORE_ENVIRONMENT=Development dotnet "$APP_DIR/bin/$CONFIGURATION/net10.0/TestApp.dll" \
+ASPNETCORE_ENVIRONMENT=Development dotnet "$APP_DIR/bin/$CONFIGURATION/net11.0/TestApp.dll" \
     --urls "http://127.0.0.1:$APP_PORT" --contentRoot "$APP_DIR" > "$TEST_DIR/app-run.log" 2>&1 &
 APP_PID=$!
 CSS_URL="http://127.0.0.1:$APP_PORT/_content/TestRclMultiTfm/css/app.css"
